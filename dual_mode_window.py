@@ -380,6 +380,7 @@ class DualModeMainWindow(QMainWindow):
     DEFAULT_REFRESH_INTERVAL_MS = 16
     STATS_INTERVAL_MS = 5000
     REFRESH_HEADROOM_FACTOR = 0.85
+    MIN_STEP_INTERVAL_MS = 30  # Minimum time between step operations
     
     def __init__(self):
         super().__init__()
@@ -396,11 +397,14 @@ class DualModeMainWindow(QMainWindow):
         self._last_displayed_frame: int = -1
         self._master_volume: float = 1.0
         self._was_playing_before_seek: bool = False
+        self._playing: bool = False  # Explicit playing state to avoid race conditions
+        self._last_step_time: int = 0  # Timestamp of last step operation (ms)
 
         # Performance tracking
         self._frames_displayed = 0
         self._frames_dropped = 0
         self._frame_timer = QElapsedTimer()
+        self._frame_timer.start()  # Start immediately for step throttling
         
         self._setup_ui()
         self._setup_timers()
@@ -569,36 +573,46 @@ class DualModeMainWindow(QMainWindow):
         current_time = 0.0
         if self._native_player:
             current_time = self._native_player.current_time
-            self._native_player.pause()
+            # Only pause if actually playing
+            if self._native_player.is_playing:
+                self._native_player.pause()
         
-        # Pause audio (it's shared between modes)
-        if self._frame_controller:
+        # Pause audio if playing
+        if self._frame_controller and self._playing:
             self._frame_controller.audio_engine.pause()
-            self._frame_controller.seek(current_time)
-            self._display_current_frame()
         
-        self._video_stack.setCurrentIndex(0)  # Show frame-accurate widget
+        # Sync position and display frame
+        if self._frame_controller:
+            self._frame_controller.seek(current_time)
+            # Display the frame BEFORE switching widgets to avoid black flash
+            self._display_current_frame()
+            # Force the widget to repaint immediately
+            self._frame_video_widget.repaint()
+        
+        # Now switch to show the frame-accurate widget (which already has the frame)
+        self._video_stack.setCurrentIndex(0)
         self._mode = PlaybackMode.FRAME_ACCURATE
         self._mode_indicator.set_mode(PlaybackMode.FRAME_ACCURATE)
         logger.debug("Switched to FRAME_ACCURATE mode")
     
     def _on_native_time_changed(self, time_pos: float) -> None:
         """Handle time updates from native player - keep audio in sync."""
-        if self._mode == PlaybackMode.NATIVE:
+        if self._mode == PlaybackMode.NATIVE and self._playing:
             self._update_time_display_from_time(time_pos)
             
-            # Check for audio drift and resync if needed
-            if self._frame_controller:
+            # Check for audio drift and resync if needed (only while actually playing)
+            if self._frame_controller and self._playing:
                 audio_time = self._frame_controller.audio_engine.current_time()
                 drift = abs(time_pos - audio_time)
-                # Resync if drift exceeds 100ms
-                if drift > 0.1:
+                # Resync if drift exceeds 200ms (increased threshold to reduce stuttering)
+                if drift > 0.2:
                     logger.debug(f"Audio drift detected: {drift:.3f}s, resyncing")
                     self._frame_controller.audio_engine.seek(time_pos)
                     self._frame_controller.audio_engine.play()
     
     def _on_native_playback_ended(self) -> None:
         """Handle end of native playback."""
+        self._playing = False
         # Stop audio engine
         if self._frame_controller:
             self._frame_controller.audio_engine.pause()
@@ -689,11 +703,7 @@ class DualModeMainWindow(QMainWindow):
     
     def _is_playing(self) -> bool:
         """Check if currently playing."""
-        if self._mode == PlaybackMode.NATIVE and self._native_player:
-            return self._native_player.is_playing
-        elif self._frame_controller:
-            return self._frame_controller.is_playing
-        return False
+        return self._playing
     
     def _toggle_playback(self) -> None:
         if not self._frame_controller:
@@ -708,40 +718,53 @@ class DualModeMainWindow(QMainWindow):
     
     def _play(self) -> None:
         """Start playback (prefers native mode for smooth video, AudioEngine for audio)."""
-        if not self._frame_controller:
+        if not self._frame_controller or self._playing:
             return
         
-        # Get current time for syncing
+        # Get current time for syncing BEFORE setting _playing (avoid race)
         current_time = self._frame_controller.current_time
         
-        # Try to use native mode for video playback
-        if self._switch_to_native_mode() and self._native_player:
-            # Start native video player
-            self._native_player.play()
-            # Start our AudioEngine for multi-track audio (synced to same position)
+        # Ensure audio is stopped and reset before resuming (clear any bad state)
+        self._frame_controller.audio_engine.pause()
+        
+        self._playing = True
+        
+        # If already in native mode (paused), just resume
+        if self._mode == PlaybackMode.NATIVE and self._native_player:
+            self._native_player.seek(current_time)
             self._frame_controller.audio_engine.seek(current_time)
+            self._native_player.play()
+            self._frame_controller.audio_engine.play()
+        # Try to switch to native mode for video playback
+        elif self._switch_to_native_mode() and self._native_player:
+            # _switch_to_native_mode already seeked the native player
+            self._frame_controller.audio_engine.seek(current_time)
+            self._native_player.play()
             self._frame_controller.audio_engine.play()
         else:
             # Fallback to frame-accurate (both video and audio)
             self._frame_controller.play()
     
     def _pause(self) -> None:
-        """Pause playback (switches to frame-accurate mode for stepping)."""
+        """Pause playback - stays in current mode, only switches when stepping."""
+        if not self._playing:
+            return
+            
+        self._playing = False
+        
         if self._mode == PlaybackMode.NATIVE and self._native_player:
             # Pause both native video and our audio engine
             self._native_player.pause()
             if self._frame_controller:
                 self._frame_controller.audio_engine.pause()
-        
-        if self._frame_controller:
-            # Sync position from native to frame-accurate
-            if self._mode == PlaybackMode.NATIVE and self._native_player:
+                # Sync position from native to frame-accurate (for later stepping)
                 self._frame_controller.seek(self._native_player.current_time)
-            else:
+        else:
+            if self._frame_controller:
                 self._frame_controller.pause()
         
-        # Switch to frame-accurate mode for potential stepping
-        self._switch_to_frame_accurate_mode()
+        # DON'T switch to frame-accurate mode here - stay in native mode
+        # to avoid black flash. We'll switch when user actually steps.
     
     def _step_forward(self) -> None:
         if not self._frame_controller:
@@ -750,6 +773,15 @@ class DualModeMainWindow(QMainWindow):
             self._show_notification("End", 500)
             return
 
+        # Throttle step operations to prevent overwhelming the system
+        current_time_ms = self._frame_timer.elapsed()
+        if current_time_ms - self._last_step_time < self.MIN_STEP_INTERVAL_MS:
+            return
+        self._last_step_time = current_time_ms
+
+        # Stepping always means we're paused
+        self._playing = False
+        
         # Ensure we're in frame-accurate mode
         self._switch_to_frame_accurate_mode()
         
@@ -765,6 +797,15 @@ class DualModeMainWindow(QMainWindow):
             self._show_notification("Start", 500)
             return
 
+        # Throttle step operations to prevent overwhelming the system
+        current_time_ms = self._frame_timer.elapsed()
+        if current_time_ms - self._last_step_time < self.MIN_STEP_INTERVAL_MS:
+            return
+        self._last_step_time = current_time_ms
+
+        # Stepping always means we're paused
+        self._playing = False
+        
         # Ensure we're in frame-accurate mode
         self._switch_to_frame_accurate_mode()
         
