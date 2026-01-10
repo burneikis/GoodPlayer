@@ -259,6 +259,7 @@ class VideoWidget(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setStyleSheet("background-color: black;")
         self._aspect_ratio: float = 16 / 9
+        self._last_size = None  # Cache for scaled size
     
     def display_frame(self, frame: np.ndarray) -> None:
         """Display a numpy RGB frame."""
@@ -276,11 +277,12 @@ class VideoWidget(QLabel):
         )
         
         # Scale to fit widget while maintaining aspect ratio
+        # Use FastTransformation for smooth playback, SmoothTransformation is too slow
         pixmap = QPixmap.fromImage(qimage)
         scaled = pixmap.scaled(
             self.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
+            Qt.TransformationMode.FastTransformation
         )
         
         self.setPixmap(scaled)
@@ -294,7 +296,7 @@ class VideoWidget(QLabel):
 class MainWindow(QMainWindow):
     """Main application window with performance monitoring."""
     
-    REFRESH_INTERVAL_MS = 16
+    REFRESH_INTERVAL_MS = 8  # ~120Hz polling for smoother frame pacing
     STATS_INTERVAL_MS = 5000  # Log stats every 5 seconds
     
     def __init__(self):
@@ -308,6 +310,11 @@ class MainWindow(QMainWindow):
         self._frames_displayed = 0
         self._frames_dropped = 0
         self._frame_timer = QElapsedTimer()
+        
+        # Frame pacing
+        self._last_frame_time: float = 0.0
+        self._playback_start_time: float = 0.0
+        self._playback_start_frame: int = 0
         
         self._setup_ui()
         self._setup_timers()
@@ -553,6 +560,11 @@ class MainWindow(QMainWindow):
                 self._show_notification("End", 600)
                 return
 
+            # Frame pacing: only display if it's a new frame
+            # This avoids displaying the same frame multiple times
+            if current_frame == self._last_displayed_frame:
+                return
+            
             # Check for dropped frames
             if self._last_displayed_frame >= 0:
                 expected_advance = 1

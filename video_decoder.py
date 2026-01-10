@@ -52,6 +52,12 @@ class LRUCache:
             self._misses = 0
     
     def __contains__(self, key: int) -> bool:
+        """Check if key is in cache (doesn't affect LRU order or stats)."""
+        with self._lock:
+            return key in self._cache
+    
+    def peek(self, key: int) -> bool:
+        """Check if key exists without affecting LRU order or stats."""
         with self._lock:
             return key in self._cache
     
@@ -90,9 +96,9 @@ class VideoDecoder:
     and background prefetching.
     """
     
-    # Memory budget for cache (in bytes) - ~500MB default
-    CACHE_MEMORY_BUDGET = 500 * 1024 * 1024
-    PREFETCH_AHEAD = 30  # Frames to prefetch ahead
+    # Memory budget for cache (in bytes) - ~1GB default for smooth playback
+    CACHE_MEMORY_BUDGET = 1024 * 1024 * 1024
+    PREFETCH_AHEAD = 90  # Frames to prefetch ahead (~3 seconds at 30fps)
     PREFETCH_BEHIND = 10  # Frames to keep behind
     
     def __init__(self, filepath: str, cache_seconds: float = 2.0):
@@ -142,8 +148,11 @@ class VideoDecoder:
         self._container = av.open(filepath)
         self._stream = self._container.streams.video[0]
         
-        # Enable multi-threaded decoding
+        # Enable multi-threaded decoding for maximum performance
+        # AUTO will use both FRAME and SLICE threading where supported
         self._stream.thread_type = "AUTO"
+        # Use multiple threads (default is usually good, but let's be explicit)
+        self._stream.thread_count = 0  # 0 = auto-detect optimal thread count
         
         # Extract metadata
         self.time_base = self._stream.time_base
@@ -251,22 +260,32 @@ class VideoDecoder:
                 with self._prefetch_lock:
                     target = self._prefetch_target
                 
-                # Prefetch frames ahead of target
-                for offset in range(1, self.PREFETCH_AHEAD + 1):
-                    if not self._prefetch_running:
-                        break
-                    
-                    frame_idx = target + offset
-                    if 0 <= frame_idx < self.total_frames and frame_idx not in self._cache:
-                        self._decode_frame_internal(frame_idx)
-                    
-                    # Check if target changed
-                    with self._prefetch_lock:
-                        if abs(self._prefetch_target - target) > 5:
-                            break
+                # Count frames we need to decode
+                frames_to_decode = []
+                for i in range(1, self.PREFETCH_AHEAD + 1):
+                    frame_idx = target + i
+                    if 0 <= frame_idx < self.total_frames and not self._cache.peek(frame_idx):
+                        frames_to_decode.append(frame_idx)
                 
-                # Sleep before next prefetch cycle
-                threading.Event().wait(0.05)
+                # Decode missing frames
+                if frames_to_decode:
+                    for frame_idx in frames_to_decode:
+                        if not self._prefetch_running:
+                            break
+                        
+                        # Double-check it's not in cache now
+                        if not self._cache.peek(frame_idx):
+                            self._decode_frame_internal(frame_idx)
+                        
+                        # Check if target changed significantly - user seeked
+                        with self._prefetch_lock:
+                            if abs(self._prefetch_target - target) > 15:
+                                break
+                    
+                    # No sleep when actively prefetching to maximize throughput
+                else:
+                    # Sleep briefly when cache is well-filled
+                    threading.Event().wait(0.005)
                 
             except Exception as e:
                 logger.debug(f"Prefetch error: {e}")
@@ -357,7 +376,7 @@ class VideoDecoder:
         if cached is not None:
             return cached
         
-        # Decode the frame
+        # Decode the frame if not in cache
         return self._decode_frame_internal(frame_index)
     
     def get_frame_async(self, frame_index: int) -> FrameRequest:

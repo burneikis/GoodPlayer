@@ -168,6 +168,14 @@ class PlaybackController:
         
         # Get the current manual time (where we should start playing from)
         target_time = self._clock.get_manual_time()
+        target_frame = int(target_time * self._video_decoder.fps)
+        
+        # Pre-buffer: ensure we have frames decoded ahead before starting
+        # This helps prevent stutter at the start of playback
+        for i in range(min(30, self._video_decoder.total_frames - target_frame)):
+            frame_idx = target_frame + i
+            if frame_idx < self._video_decoder.total_frames:
+                self._video_decoder.get_frame(frame_idx)
         
         # Always seek audio to ensure proper sync
         # This clears buffers and refills from the correct position
