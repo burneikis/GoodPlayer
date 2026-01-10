@@ -218,6 +218,16 @@ class WelcomeOverlay(QLabel):
         """)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._click_callback = None
+    
+    def update_position(self) -> None:
+        """Center the overlay in the parent widget."""
+        if self.parent():
+            parent_rect = self.parent().rect()
+            self.adjustSize()
+            x = (parent_rect.width() - self.width()) // 2
+            y = (parent_rect.height() - self.height()) // 2
+            self.move(x, y)
+            self.raise_()
 
     def set_click_callback(self, callback):
         self._click_callback = callback
@@ -400,6 +410,7 @@ class DualModeMainWindow(QMainWindow):
         # Overlays (on top of video container)
         self._welcome_overlay = WelcomeOverlay(self._video_container)
         self._welcome_overlay.set_click_callback(self._open_file)
+        self._welcome_overlay.raise_()  # Ensure it's on top of the stacked widget
 
         self._notification = NotificationOverlay(self._video_container)
         
@@ -946,6 +957,12 @@ class DualModeMainWindow(QMainWindow):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_info_label_positions()
+    
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # Position welcome overlay after window is shown
+        if self._welcome_overlay.isVisible():
+            self._welcome_overlay.update_position()
 
     def _update_info_label_positions(self) -> None:
         margin = 10
@@ -962,6 +979,10 @@ class DualModeMainWindow(QMainWindow):
         
         # Mode indicator in top-left
         self._mode_indicator.move(margin, margin)
+        
+        # Welcome overlay centered
+        if self._welcome_overlay.isVisible():
+            self._welcome_overlay.update_position()
 
     def closeEvent(self, event) -> None:
         self._refresh_timer.stop()
