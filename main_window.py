@@ -560,7 +560,9 @@ class MainWindow(QMainWindow):
         """Change master volume by delta amount."""
         if not self._controller:
             return
-        self._master_volume = max(0.0, min(1.0, self._master_volume + delta))
+        new_volume = self._master_volume + delta
+        # Round to nearest 5% to avoid floating-point precision issues
+        self._master_volume = max(0.0, min(1.0, round(new_volume * 20) / 20))
         # Apply to all audio tracks
         for i in range(self._controller.num_audio_tracks):
             self._controller.set_track_volume(i, self._master_volume)
