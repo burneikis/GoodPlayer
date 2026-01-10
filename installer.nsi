@@ -18,9 +18,6 @@ ShowInstDetails show
 
 !include "MUI2.nsh"
 
-!define MUI_ICON "icon.ico"
-!define MUI_UNICON "icon.ico"
-
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
