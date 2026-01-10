@@ -413,6 +413,10 @@ class MainWindow(QMainWindow):
         """Step forward one frame."""
         if not self._controller:
             return
+        # Don't step past the last frame
+        if self._controller.current_frame >= self._controller.total_frames - 1:
+            self._show_notification("End", 500)
+            return
 
         self._controller.step_forward()
         self._display_current_frame()
@@ -422,6 +426,10 @@ class MainWindow(QMainWindow):
     def _step_backward(self) -> None:
         """Step backward one frame."""
         if not self._controller:
+            return
+        # Don't step before the first frame
+        if self._controller.current_frame <= 0:
+            self._show_notification("Start", 500)
             return
 
         self._controller.step_backward()
@@ -470,10 +478,21 @@ class MainWindow(QMainWindow):
         """Called by timer to refresh the display during playback."""
         if not self._controller:
             return
-        
+
         current_frame = self._controller.current_frame
-        
+
         if self._controller.is_playing:
+            # Check if we've reached the end of the video
+            if current_frame >= self._controller.total_frames - 1:
+                self._controller.pause()
+                # Seek to last valid frame
+                max_time = (self._controller.total_frames - 1) / self._controller.fps
+                self._controller.seek(max_time)
+                self._display_current_frame()
+                self._update_time_display()
+                self._show_notification("End", 600)
+                return
+
             # Check for dropped frames
             if self._last_displayed_frame >= 0:
                 expected_advance = 1
@@ -482,7 +501,7 @@ class MainWindow(QMainWindow):
                     dropped = actual_advance - expected_advance
                     self._frames_dropped += dropped
                     logger.debug(f"Dropped {dropped} frames")
-            
+
             self._display_current_frame()
             self._update_time_display()
         elif current_frame != self._last_displayed_frame:
@@ -542,7 +561,9 @@ class MainWindow(QMainWindow):
         """Skip forward or backward by the given number of seconds."""
         if not self._controller:
             return
-        new_time = max(0, min(self._controller.duration, self._controller.current_time + seconds))
+        # Calculate max valid time (last frame's start time)
+        max_time = (self._controller.total_frames - 1) / self._controller.fps
+        new_time = max(0.0, min(max_time, self._controller.current_time + seconds))
         self._controller.seek(new_time)
         self._display_current_frame()
         self._update_time_display()
@@ -584,19 +605,13 @@ class MainWindow(QMainWindow):
         elif key == Qt.Key.Key_Down:
             self._change_volume(-0.05)
         elif key == Qt.Key.Key_BracketLeft:
-            # [ = 5s back, Shift+[ = 10s back
-            skip_time = 10 if (modifiers & Qt.KeyboardModifier.ShiftModifier) else 5
-            self._skip_time(-skip_time)
+            self._skip_time(-5)  # [ = 5s back
         elif key == Qt.Key.Key_BracketRight:
-            # ] = 5s forward, Shift+] = 10s forward
-            skip_time = 10 if (modifiers & Qt.KeyboardModifier.ShiftModifier) else 5
-            self._skip_time(skip_time)
-        elif key == Qt.Key.Key_Backslash:
-            # \ = 30s forward, Shift+\ = 30s back
-            if modifiers & Qt.KeyboardModifier.ShiftModifier:
-                self._skip_time(-30)
-            else:
-                self._skip_time(30)
+            self._skip_time(10)  # ] = 10s forward
+        elif key == Qt.Key.Key_BraceLeft:
+            self._skip_time(-15)  # { = 15s back
+        elif key == Qt.Key.Key_BraceRight:
+            self._skip_time(30)  # } = 30s forward
         elif key == Qt.Key.Key_A:
             self._toggle_audio_mixer()
         else:
