@@ -178,12 +178,13 @@ class NotificationOverlay(QLabel):
         """Show a notification that fades after duration."""
         self.setText(text)
         self.adjustSize()
-        # Center on parent
+        # Position in top right of parent
         if self.parent():
             parent_rect = self.parent().rect()
+            margin = 10
             self.move(
-                (parent_rect.width() - self.width()) // 2,
-                (parent_rect.height() - self.height()) // 2
+                parent_rect.width() - self.width() - margin,
+                margin
             )
         self.show()
         self.raise_()
