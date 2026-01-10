@@ -308,11 +308,15 @@ class MainWindow(QMainWindow):
         # Notification overlay (on top of video)
         self._notification = NotificationOverlay(self._video_widget)
 
-        # Time/frame info overlay (bottom right of video, no background)
-        self._info_label = QLabel("00:00.000 / 00:00.000  |  Frame: 0 / 0", self._video_widget)
-        self._info_label.setStyleSheet("color: white; font-family: monospace; background: transparent;")
-        self._info_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._info_label.adjustSize()
+        # Time info overlay (bottom left of video, no background)
+        self._time_label = QLabel("00:00.000 / 00:00.000", self._video_widget)
+        self._time_label.setStyleSheet("color: white; font-family: monospace; background: transparent;")
+        self._time_label.adjustSize()
+
+        # Frame info overlay (bottom right of video, no background)
+        self._frame_label = QLabel("Frame: 0 / 0", self._video_widget)
+        self._frame_label.setStyleSheet("color: white; font-family: monospace; background: transparent;")
+        self._frame_label.adjustSize()
 
         # Controls panel
         controls_panel = QWidget()
@@ -399,7 +403,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Failed to load file: {e}")
             self._video_widget.clear_display()
-            self._info_label.setText(f"Error: {e}")
+            self._time_label.setText(f"Error: {e}")
     
     def _show_notification(self, text: str, duration_ms: int = 800) -> None:
         """Show a notification overlay."""
@@ -473,11 +477,9 @@ class MainWindow(QMainWindow):
             secs = seconds % 60
             return f"{mins:02d}:{secs:06.3f}"
 
-        self._info_label.setText(
-            f"{format_time(current_time)} / {format_time(duration)}  |  "
-            f"Frame: {current_frame} / {total_frames}"
-        )
-        self._update_info_label_position()
+        self._time_label.setText(f"{format_time(current_time)} / {format_time(duration)}")
+        self._frame_label.setText(f"Frame: {current_frame} / {total_frames}")
+        self._update_info_label_positions()
 
         # Update slider (without triggering signals)
         if not self._timeline_slider.isSliderDown():
@@ -645,18 +647,27 @@ class MainWindow(QMainWindow):
             self._show_notification("Mixer: On", 600)
     
     def resizeEvent(self, event) -> None:
-        """Handle window resize - reposition info label overlay."""
+        """Handle window resize - reposition info label overlays."""
         super().resizeEvent(event)
-        self._update_info_label_position()
+        self._update_info_label_positions()
 
-    def _update_info_label_position(self) -> None:
-        """Position the info label at bottom right of video widget."""
-        self._info_label.adjustSize()
+    def _update_info_label_positions(self) -> None:
+        """Position the time label at bottom left and frame label at bottom right."""
         margin = 10
         video_rect = self._video_widget.rect()
-        self._info_label.move(
-            video_rect.width() - self._info_label.width() - margin,
-            video_rect.height() - self._info_label.height() - margin
+
+        # Time label - bottom left
+        self._time_label.adjustSize()
+        self._time_label.move(
+            margin,
+            video_rect.height() - self._time_label.height() - margin
+        )
+
+        # Frame label - bottom right
+        self._frame_label.adjustSize()
+        self._frame_label.move(
+            video_rect.width() - self._frame_label.width() - margin,
+            video_rect.height() - self._frame_label.height() - margin
         )
 
     def closeEvent(self, event) -> None:
