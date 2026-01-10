@@ -36,11 +36,14 @@ python run.py [video_file]
 | Key | Action |
 |-----|--------|
 | `Space` | Play / Pause |
-| `←` | Step back one frame |
-| `→` | Step forward one frame |
-| `Home` | Go to beginning |
-| `End` | Go to end |
-| `S` | Print stats to console |
+| `Left` | Step back one frame |
+| `Right` | Step forward one frame |
+| `Up` | Volume up |
+| `Down` | Volume down |
+| `[` | Skip back 5 seconds |
+| `]` | Skip forward 10 seconds |
+| `{` | Skip back 15 seconds |
+| `}` | Skip forward 30 seconds |
 
 ## Key Design Decisions
 
