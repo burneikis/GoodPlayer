@@ -48,6 +48,7 @@ class AudioTrackWidget(QFrame):
         self._volume_slider.setRange(0, 100)
         self._volume_slider.setValue(100)
         self._volume_slider.setMinimumHeight(80)
+        self._volume_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._volume_slider.valueChanged.connect(self._on_volume_changed)
         layout.addWidget(self._volume_slider, alignment=Qt.AlignmentFlag.AlignHCenter)
 
@@ -60,6 +61,7 @@ class AudioTrackWidget(QFrame):
         # Mute checkbox
         self._mute_checkbox = QCheckBox("Mute")
         self._mute_checkbox.setStyleSheet("color: white;")
+        self._mute_checkbox.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._mute_checkbox.stateChanged.connect(self._on_mute_changed)
         layout.addWidget(self._mute_checkbox, alignment=Qt.AlignmentFlag.AlignHCenter)
 
@@ -320,6 +322,7 @@ class MainWindow(QMainWindow):
         # Timeline slider (clickable)
         self._timeline_slider = ClickableSlider(Qt.Orientation.Horizontal)
         self._timeline_slider.setEnabled(False)
+        self._timeline_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._timeline_slider.sliderPressed.connect(self._on_slider_pressed)
         self._timeline_slider.sliderReleased.connect(self._on_slider_released)
         self._timeline_slider.valueChanged.connect(self._on_slider_value_changed)
