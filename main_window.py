@@ -534,14 +534,19 @@ class MainWindow(QMainWindow):
             self._was_playing_before_seek = False
     
     def _on_slider_released(self) -> None:
-        """Handle slider release - resume if was playing."""
-        if hasattr(self, '_was_playing_before_seek') and self._was_playing_before_seek:
-            if self._controller:
+        """Handle slider release - seek to final position and resume if was playing."""
+        if self._controller:
+            # Always seek to the current slider value on release
+            self._controller.seek_to_frame(self._timeline_slider.value())
+            self._display_current_frame()
+            self._update_time_display()
+            # Resume if was playing before seek
+            if hasattr(self, '_was_playing_before_seek') and self._was_playing_before_seek:
                 self._controller.play()
-    
+
     def _on_slider_value_changed(self, value: int) -> None:
-        """Handle slider value change - seek to frame."""
-        # Only seek if slider is being pressed (user interaction)
+        """Handle slider value change - seek to frame during drag."""
+        # Only update display during drag (actual seek happens on release)
         if self._controller and self._timeline_slider.isSliderDown():
             self._controller.seek_to_frame(value)
             self._display_current_frame()
