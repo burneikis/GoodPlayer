@@ -10,7 +10,8 @@ from typing import Optional
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QSlider, QFileDialog, QSizePolicy
+    QLabel, QPushButton, QSlider, QFileDialog, QSizePolicy, QCheckBox,
+    QFrame, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer, QElapsedTimer
 from PyQt6.QtGui import QImage, QPixmap, QKeyEvent
@@ -18,6 +19,195 @@ from PyQt6.QtGui import QImage, QPixmap, QKeyEvent
 from playback_controller import PlaybackController
 
 logger = logging.getLogger(__name__)
+
+
+class AudioTrackWidget(QFrame):
+    """Widget for controlling a single audio track."""
+
+    def __init__(self, track_index: int, parent=None):
+        super().__init__(parent)
+        self.track_index = track_index
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setFrameStyle(QFrame.Shape.StyledPanel)
+        self.setStyleSheet("background-color: #3a3a3a; border-radius: 4px; padding: 5px;")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(5)
+
+        # Track label
+        self._label = QLabel(f"Track {self.track_index + 1}")
+        self._label.setStyleSheet("color: white; font-weight: bold;")
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._label)
+
+        # Volume slider (vertical)
+        self._volume_slider = QSlider(Qt.Orientation.Vertical)
+        self._volume_slider.setRange(0, 100)
+        self._volume_slider.setValue(100)
+        self._volume_slider.setMinimumHeight(80)
+        self._volume_slider.valueChanged.connect(self._on_volume_changed)
+        layout.addWidget(self._volume_slider, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        # Volume label
+        self._volume_label = QLabel("100%")
+        self._volume_label.setStyleSheet("color: #aaa;")
+        self._volume_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._volume_label)
+
+        # Mute checkbox
+        self._mute_checkbox = QCheckBox("Mute")
+        self._mute_checkbox.setStyleSheet("color: white;")
+        self._mute_checkbox.stateChanged.connect(self._on_mute_changed)
+        layout.addWidget(self._mute_checkbox, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        self._volume_callback = None
+        self._mute_callback = None
+
+    def set_volume_callback(self, callback):
+        self._volume_callback = callback
+
+    def set_mute_callback(self, callback):
+        self._mute_callback = callback
+
+    def _on_volume_changed(self, value: int):
+        self._volume_label.setText(f"{value}%")
+        if self._volume_callback:
+            self._volume_callback(self.track_index, value / 100.0)
+
+    def _on_mute_changed(self, state: int):
+        if self._mute_callback:
+            self._mute_callback(self.track_index, state == Qt.CheckState.Checked.value)
+
+    def set_volume(self, volume: float):
+        self._volume_slider.blockSignals(True)
+        self._volume_slider.setValue(int(volume * 100))
+        self._volume_label.setText(f"{int(volume * 100)}%")
+        self._volume_slider.blockSignals(False)
+
+
+class AudioMixerPanel(QFrame):
+    """Panel for audio mixing controls."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._track_widgets = []
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setStyleSheet("background-color: #2b2b2b;")
+        self.setFixedWidth(120)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
+        # Header
+        header = QLabel("Audio Mixer")
+        header.setStyleSheet("color: white; font-weight: bold; font-size: 12px;")
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(header)
+
+        # Scroll area for tracks
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border: none;")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self._tracks_container = QWidget()
+        self._tracks_layout = QVBoxLayout(self._tracks_container)
+        self._tracks_layout.setContentsMargins(0, 0, 0, 0)
+        self._tracks_layout.setSpacing(5)
+        self._tracks_layout.addStretch()
+
+        scroll.setWidget(self._tracks_container)
+        layout.addWidget(scroll)
+
+        # Placeholder when no tracks
+        self._no_tracks_label = QLabel("No audio\ntracks")
+        self._no_tracks_label.setStyleSheet("color: #666;")
+        self._no_tracks_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._tracks_layout.insertWidget(0, self._no_tracks_label)
+
+    def setup_tracks(self, num_tracks: int, volume_callback, mute_callback):
+        """Setup track widgets for the given number of audio tracks."""
+        # Clear existing widgets
+        for widget in self._track_widgets:
+            self._tracks_layout.removeWidget(widget)
+            widget.deleteLater()
+        self._track_widgets.clear()
+
+        self._no_tracks_label.setVisible(num_tracks == 0)
+
+        for i in range(num_tracks):
+            track_widget = AudioTrackWidget(i)
+            track_widget.set_volume_callback(volume_callback)
+            track_widget.set_mute_callback(mute_callback)
+            self._track_widgets.append(track_widget)
+            self._tracks_layout.insertWidget(i, track_widget)
+
+    def set_track_volume(self, track_index: int, volume: float):
+        if 0 <= track_index < len(self._track_widgets):
+            self._track_widgets[track_index].set_volume(volume)
+
+
+class NotificationOverlay(QLabel):
+    """Overlay widget for showing action notifications."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet("""
+            background-color: rgba(0, 0, 0, 180);
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            padding: 10px 20px;
+            border-radius: 8px;
+        """)
+        self.hide()
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.hide)
+
+    def show_notification(self, text: str, duration_ms: int = 1000) -> None:
+        """Show a notification that fades after duration."""
+        self.setText(text)
+        self.adjustSize()
+        # Center on parent
+        if self.parent():
+            parent_rect = self.parent().rect()
+            self.move(
+                (parent_rect.width() - self.width()) // 2,
+                (parent_rect.height() - self.height()) // 2
+            )
+        self.show()
+        self.raise_()
+        self._timer.start(duration_ms)
+
+
+class ClickableSlider(QSlider):
+    """A slider that responds to mouse clicks anywhere on the track."""
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Calculate value from click position
+            if self.orientation() == Qt.Orientation.Horizontal:
+                value = self.minimum() + (self.maximum() - self.minimum()) * event.position().x() / self.width()
+            else:
+                value = self.minimum() + (self.maximum() - self.minimum()) * (self.height() - event.position().y()) / self.height()
+            self.setValue(int(value))
+            self.sliderPressed.emit()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.sliderReleased.emit()
+        super().mouseReleaseEvent(event)
 
 
 class VideoWidget(QLabel):
@@ -73,7 +263,8 @@ class MainWindow(QMainWindow):
         
         self._controller: Optional[PlaybackController] = None
         self._last_displayed_frame: int = -1
-        
+        self._master_volume: float = 1.0
+
         # Performance tracking
         self._frames_displayed = 0
         self._frames_dropped = 0
@@ -90,62 +281,60 @@ class MainWindow(QMainWindow):
         # Central widget
         central = QWidget()
         self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Content area (video + mixer)
+        content_area = QWidget()
+        content_layout = QHBoxLayout(content_area)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
         # Video display
         self._video_widget = VideoWidget()
-        layout.addWidget(self._video_widget, stretch=1)
-        
+        content_layout.addWidget(self._video_widget, stretch=1)
+
+        # Audio mixer panel (right side)
+        self._audio_mixer = AudioMixerPanel()
+        content_layout.addWidget(self._audio_mixer)
+
+        main_layout.addWidget(content_area, stretch=1)
+
+        # Notification overlay (on top of video)
+        self._notification = NotificationOverlay(self._video_widget)
+
         # Controls panel
         controls_panel = QWidget()
         controls_panel.setStyleSheet("background-color: #2b2b2b;")
         controls_layout = QVBoxLayout(controls_panel)
         controls_layout.setContentsMargins(10, 5, 10, 5)
-        
-        # Timeline slider
-        self._timeline_slider = QSlider(Qt.Orientation.Horizontal)
+
+        # Frame counter above progress bar
+        self._frame_label = QLabel("Frame: 0 / 0")
+        self._frame_label.setStyleSheet("color: white; font-family: monospace;")
+        self._frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        controls_layout.addWidget(self._frame_label)
+
+        # Timeline slider (clickable)
+        self._timeline_slider = ClickableSlider(Qt.Orientation.Horizontal)
         self._timeline_slider.setEnabled(False)
         self._timeline_slider.sliderPressed.connect(self._on_slider_pressed)
         self._timeline_slider.sliderReleased.connect(self._on_slider_released)
-        self._timeline_slider.sliderMoved.connect(self._on_slider_moved)
+        self._timeline_slider.valueChanged.connect(self._on_slider_value_changed)
         controls_layout.addWidget(self._timeline_slider)
         
-        # Button row
+        # Button row (simplified - most controls use keyboard shortcuts)
         button_row = QHBoxLayout()
-        
-        # Open button
-        self._open_btn = QPushButton("Open")
-        self._open_btn.clicked.connect(self._open_file)
-        button_row.addWidget(self._open_btn)
-        
-        # Play/Pause button
-        self._play_btn = QPushButton("Play")
-        self._play_btn.setEnabled(False)
-        self._play_btn.clicked.connect(self._toggle_playback)
-        button_row.addWidget(self._play_btn)
-        
-        # Frame step buttons
-        self._prev_frame_btn = QPushButton("◀ Frame")
-        self._prev_frame_btn.setEnabled(False)
-        self._prev_frame_btn.clicked.connect(self._step_backward)
-        button_row.addWidget(self._prev_frame_btn)
-        
-        self._next_frame_btn = QPushButton("Frame ▶")
-        self._next_frame_btn.setEnabled(False)
-        self._next_frame_btn.clicked.connect(self._step_forward)
-        button_row.addWidget(self._next_frame_btn)
-        
         button_row.addStretch()
         
         # Time display
-        self._time_label = QLabel("00:00.000 / 00:00.000  |  Frame: 0 / 0")
+        self._time_label = QLabel("00:00.000 / 00:00.000")
         self._time_label.setStyleSheet("color: white; font-family: monospace;")
         button_row.addWidget(self._time_label)
         
         controls_layout.addLayout(button_row)
-        layout.addWidget(controls_panel)
+        main_layout.addWidget(controls_panel)
         
         # Focus policy for keyboard events
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -187,16 +376,20 @@ class MainWindow(QMainWindow):
         try:
             self._controller = PlaybackController(filepath)
             
-            # Enable controls
-            self._play_btn.setEnabled(True)
-            self._prev_frame_btn.setEnabled(True)
-            self._next_frame_btn.setEnabled(True)
+            # Enable timeline slider
             self._timeline_slider.setEnabled(True)
             
             # Setup timeline
             self._timeline_slider.setRange(0, self._controller.total_frames - 1)
             self._timeline_slider.setValue(0)
-            
+
+            # Setup audio mixer
+            self._audio_mixer.setup_tracks(
+                self._controller.num_audio_tracks,
+                self._on_track_volume_changed,
+                self._on_track_mute_changed
+            )
+
             # Display first frame
             self._display_current_frame()
             self._update_time_display()
@@ -213,40 +406,37 @@ class MainWindow(QMainWindow):
             self._video_widget.clear_display()
             self._time_label.setText(f"Error: {e}")
     
+    def _show_notification(self, text: str, duration_ms: int = 800) -> None:
+        """Show a notification overlay."""
+        self._notification.show_notification(text, duration_ms)
+
     def _toggle_playback(self) -> None:
         """Toggle play/pause."""
         if not self._controller:
             return
-        
+
         self._controller.toggle_playback()
-        self._update_play_button()
-    
-    def _update_play_button(self) -> None:
-        """Update play button text based on state."""
-        if self._controller and self._controller.is_playing:
-            self._play_btn.setText("Pause")
-        else:
-            self._play_btn.setText("Play")
-    
+        self._show_notification("Play" if self._controller.is_playing else "Pause")
+
     def _step_forward(self) -> None:
         """Step forward one frame."""
         if not self._controller:
             return
-        
+
         self._controller.step_forward()
         self._display_current_frame()
         self._update_time_display()
-        self._update_play_button()
-    
+        self._show_notification("Step +1", 500)
+
     def _step_backward(self) -> None:
         """Step backward one frame."""
         if not self._controller:
             return
-        
+
         self._controller.step_backward()
         self._display_current_frame()
         self._update_time_display()
-        self._update_play_button()
+        self._show_notification("Step -1", 500)
     
     def _display_current_frame(self) -> None:
         """Display the current frame."""
@@ -260,24 +450,22 @@ class MainWindow(QMainWindow):
             self._frames_displayed += 1
     
     def _update_time_display(self) -> None:
-        """Update the time label."""
+        """Update the time and frame labels."""
         if not self._controller:
             return
-        
+
         current_time = self._controller.current_time
         duration = self._controller.duration
         current_frame = self._controller.current_frame
         total_frames = self._controller.total_frames
-        
+
         def format_time(seconds: float) -> str:
             mins = int(seconds) // 60
             secs = seconds % 60
             return f"{mins:02d}:{secs:06.3f}"
-        
-        self._time_label.setText(
-            f"{format_time(current_time)} / {format_time(duration)}  |  "
-            f"Frame: {current_frame} / {total_frames}"
-        )
+
+        self._time_label.setText(f"{format_time(current_time)} / {format_time(duration)}")
+        self._frame_label.setText(f"Frame: {current_frame} / {total_frames}")
         
         # Update slider (without triggering signals)
         if not self._timeline_slider.isSliderDown():
@@ -307,8 +495,6 @@ class MainWindow(QMainWindow):
         elif current_frame != self._last_displayed_frame:
             self._display_current_frame()
             self._update_time_display()
-        
-        self._update_play_button()
     
     def _log_stats(self) -> None:
         """Log performance statistics periodically."""
@@ -341,38 +527,83 @@ class MainWindow(QMainWindow):
             if self._controller:
                 self._controller.play()
     
-    def _on_slider_moved(self, value: int) -> None:
-        """Handle slider movement - seek to frame."""
-        if self._controller:
+    def _on_slider_value_changed(self, value: int) -> None:
+        """Handle slider value change - seek to frame."""
+        # Only seek if slider is being pressed (user interaction)
+        if self._controller and self._timeline_slider.isSliderDown():
             self._controller.seek_to_frame(value)
             self._display_current_frame()
             self._update_time_display()
-    
+
+    def _change_volume(self, delta: float) -> None:
+        """Change master volume by delta amount."""
+        if not self._controller:
+            return
+        self._master_volume = max(0.0, min(1.0, self._master_volume + delta))
+        # Apply to all audio tracks
+        for i in range(self._controller.num_audio_tracks):
+            self._controller.set_track_volume(i, self._master_volume)
+        self._show_notification(f"Volume: {int(self._master_volume * 100)}%", 600)
+
+    def _skip_time(self, seconds: float) -> None:
+        """Skip forward or backward by the given number of seconds."""
+        if not self._controller:
+            return
+        new_time = max(0, min(self._controller.duration, self._controller.current_time + seconds))
+        self._controller.seek(new_time)
+        self._display_current_frame()
+        self._update_time_display()
+        sign = "+" if seconds > 0 else ""
+        self._show_notification(f"Skip {sign}{int(seconds)}s", 600)
+
+    def _on_track_volume_changed(self, track_index: int, volume: float) -> None:
+        """Handle track volume change from mixer UI."""
+        if self._controller:
+            self._controller.set_track_volume(track_index, volume)
+
+    def _on_track_mute_changed(self, track_index: int, muted: bool) -> None:
+        """Handle track mute change from mixer UI."""
+        if self._controller:
+            self._controller.set_track_muted(track_index, muted)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """Handle keyboard input."""
+        key = event.key()
+        modifiers = event.modifiers()
+
+        # Ctrl+O / Cmd+O to open file (works without controller)
+        if key == Qt.Key.Key_O and (modifiers & Qt.KeyboardModifier.ControlModifier):
+            self._open_file()
+            return
+
         if not self._controller:
             super().keyPressEvent(event)
             return
-        
-        key = event.key()
-        
+
         if key == Qt.Key.Key_Space:
             self._toggle_playback()
         elif key == Qt.Key.Key_Left:
             self._step_backward()
         elif key == Qt.Key.Key_Right:
             self._step_forward()
-        elif key == Qt.Key.Key_Home:
-            self._controller.seek(0)
-            self._display_current_frame()
-            self._update_time_display()
-        elif key == Qt.Key.Key_End:
-            self._controller.seek(self._controller.duration - 0.1)
-            self._display_current_frame()
-            self._update_time_display()
-        elif key == Qt.Key.Key_S:
-            # Manual stats dump
-            self._log_stats()
+        elif key == Qt.Key.Key_Up:
+            self._change_volume(0.05)
+        elif key == Qt.Key.Key_Down:
+            self._change_volume(-0.05)
+        elif key == Qt.Key.Key_BracketLeft:
+            # [ = 5s back, Shift+[ = 10s back
+            skip_time = 10 if (modifiers & Qt.KeyboardModifier.ShiftModifier) else 5
+            self._skip_time(-skip_time)
+        elif key == Qt.Key.Key_BracketRight:
+            # ] = 5s forward, Shift+] = 10s forward
+            skip_time = 10 if (modifiers & Qt.KeyboardModifier.ShiftModifier) else 5
+            self._skip_time(skip_time)
+        elif key == Qt.Key.Key_Backslash:
+            # \ = 30s forward, Shift+\ = 30s back
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                self._skip_time(-30)
+            else:
+                self._skip_time(30)
         else:
             super().keyPressEvent(event)
     
