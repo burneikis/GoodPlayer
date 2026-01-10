@@ -145,8 +145,24 @@ class VideoDecoder:
     
     def _open(self, filepath: str) -> None:
         """Open video file and extract metadata."""
+        self._hw_accel = False
         self._container = av.open(filepath)
         self._stream = self._container.streams.video[0]
+        
+        # Try to use hardware-accelerated decoder if available
+        codec_name = self._stream.codec_context.codec.name
+        hw_codec = None
+        
+        # Check for hardware decoder variants (macOS VideoToolbox)
+        if codec_name == 'h264':
+            hw_codec = 'h264_videotoolbox'
+        elif codec_name == 'hevc':
+            hw_codec = 'hevc_videotoolbox'
+        
+        # Unfortunately PyAV doesn't easily support switching decoders after opening
+        # The hwaccel option approach also doesn't work reliably
+        # So we stick with optimized software decoding
+        logger.info(f"Using software decoding (codec: {codec_name})")
         
         # Enable multi-threaded decoding for maximum performance
         # AUTO will use both FRAME and SLICE threading where supported

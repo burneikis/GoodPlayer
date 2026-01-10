@@ -14,7 +14,9 @@ from PyQt6.QtWidgets import (
     QFrame, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer, QElapsedTimer
-from PyQt6.QtGui import QImage, QPixmap, QKeyEvent
+from PyQt6.QtGui import QImage, QPixmap, QKeyEvent, QSurfaceFormat
+from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+from OpenGL import GL
 
 from playback_controller import PlaybackController
 
@@ -249,48 +251,130 @@ class ClickableSlider(QSlider):
         super().mouseReleaseEvent(event)
 
 
-class VideoWidget(QLabel):
-    """Widget for displaying video frames."""
+class VideoWidget(QOpenGLWidget):
+    """OpenGL-accelerated widget for displaying video frames."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(640, 360)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setStyleSheet("background-color: black;")
+        
+        self._texture_id: int = 0
+        self._frame_width: int = 0
+        self._frame_height: int = 0
+        self._texture_allocated: bool = False
         self._aspect_ratio: float = 16 / 9
-        self._last_size = None  # Cache for scaled size
+        self._has_frame: bool = False
+        self._pending_frame: Optional[np.ndarray] = None
     
-    def display_frame(self, frame: np.ndarray) -> None:
-        """Display a numpy RGB frame."""
-        if frame is None:
+    def initializeGL(self) -> None:
+        """Initialize OpenGL resources."""
+        GL.glClearColor(0.0, 0.0, 0.0, 1.0)
+        GL.glEnable(GL.GL_TEXTURE_2D)
+        
+        # Create texture
+        self._texture_id = GL.glGenTextures(1)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._texture_id)
+        
+        # Set texture parameters for optimal performance
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+    
+    def resizeGL(self, width: int, height: int) -> None:
+        """Handle widget resize."""
+        GL.glViewport(0, 0, width, height)
+        GL.glMatrixMode(GL.GL_PROJECTION)
+        GL.glLoadIdentity()
+        GL.glOrtho(0, width, height, 0, -1, 1)
+        GL.glMatrixMode(GL.GL_MODELVIEW)
+        GL.glLoadIdentity()
+    
+    def paintGL(self) -> None:
+        """Render the current frame."""
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        
+        # Upload pending frame to texture if available
+        if self._pending_frame is not None:
+            self._upload_texture(self._pending_frame)
+            self._pending_frame = None
+        
+        if not self._has_frame:
             return
         
+        # Calculate display rect maintaining aspect ratio
+        widget_width = self.width()
+        widget_height = self.height()
+        
+        if widget_width / widget_height > self._aspect_ratio:
+            # Widget is wider - fit to height
+            display_height = widget_height
+            display_width = int(widget_height * self._aspect_ratio)
+        else:
+            # Widget is taller - fit to width
+            display_width = widget_width
+            display_height = int(widget_width / self._aspect_ratio)
+        
+        x_offset = (widget_width - display_width) // 2
+        y_offset = (widget_height - display_height) // 2
+        
+        # Draw textured quad
+        GL.glEnable(GL.GL_TEXTURE_2D)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._texture_id)
+        
+        GL.glBegin(GL.GL_QUADS)
+        GL.glTexCoord2f(0, 0); GL.glVertex2f(x_offset, y_offset)
+        GL.glTexCoord2f(1, 0); GL.glVertex2f(x_offset + display_width, y_offset)
+        GL.glTexCoord2f(1, 1); GL.glVertex2f(x_offset + display_width, y_offset + display_height)
+        GL.glTexCoord2f(0, 1); GL.glVertex2f(x_offset, y_offset + display_height)
+        GL.glEnd()
+    
+    def _upload_texture(self, frame: np.ndarray) -> None:
+        """Upload frame data to GPU texture."""
         height, width, channels = frame.shape
-        self._aspect_ratio = width / height
         
-        # Create QImage from numpy array
-        bytes_per_line = channels * width
-        qimage = QImage(
-            frame.data, width, height, bytes_per_line,
-            QImage.Format.Format_RGB888
-        )
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._texture_id)
         
-        # Scale to fit widget while maintaining aspect ratio
-        # Use FastTransformation for smooth playback, SmoothTransformation is too slow
-        pixmap = QPixmap.fromImage(qimage)
-        scaled = pixmap.scaled(
-            self.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.FastTransformation
-        )
+        # Check if we need to reallocate the texture (size changed)
+        if not self._texture_allocated or width != self._frame_width or height != self._frame_height:
+            self._frame_width = width
+            self._frame_height = height
+            self._aspect_ratio = width / height
+            
+            # Allocate new texture
+            GL.glTexImage2D(
+                GL.GL_TEXTURE_2D, 0, GL.GL_RGB,
+                width, height, 0,
+                GL.GL_RGB, GL.GL_UNSIGNED_BYTE,
+                frame
+            )
+            self._texture_allocated = True
+        else:
+            # Update existing texture (faster)
+            GL.glTexSubImage2D(
+                GL.GL_TEXTURE_2D, 0,
+                0, 0, width, height,
+                GL.GL_RGB, GL.GL_UNSIGNED_BYTE,
+                frame
+            )
         
-        self.setPixmap(scaled)
+        self._has_frame = True
+    
+    def display_frame(self, frame: np.ndarray) -> None:
+        """Queue a frame for display."""
+        if frame is None:
+            return
+        # Store frame and trigger repaint
+        self._pending_frame = frame
+        self.update()  # Schedules a paintGL call
     
     def clear_display(self) -> None:
         """Clear the display."""
-        self.clear()
-        self.setStyleSheet("background-color: black;")
+        self._has_frame = False
+        self._pending_frame = None
+        self._texture_allocated = False
+        self.update()
 
 
 class MainWindow(QMainWindow):
@@ -746,6 +830,12 @@ def main():
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
+    
+    # Set up OpenGL surface format
+    surface_format = QSurfaceFormat()
+    surface_format.setSwapInterval(0)  # Disable VSync for maximum frame rate
+    surface_format.setSwapBehavior(QSurfaceFormat.SwapBehavior.DoubleBuffer)
+    QSurfaceFormat.setDefaultFormat(surface_format)
     
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
