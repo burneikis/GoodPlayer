@@ -191,6 +191,42 @@ class NotificationOverlay(QLabel):
         self._timer.start(duration_ms)
 
 
+class WelcomeOverlay(QLabel):
+    """Overlay widget prompting user to open a file."""
+
+    clicked = None  # Will be set as a callback
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setText("Click or drop a video here\nor press Ctrl/Cmd+O to Open")
+        self.setStyleSheet("""
+            QLabel {
+                background-color: rgba(0, 0, 0, 200);
+                color: #aaaaaa;
+                font-size: 20px;
+                padding: 40px;
+                border: 2px dashed #555555;
+                border-radius: 12px;
+            }
+            QLabel:hover {
+                color: #ffffff;
+                border-color: #888888;
+                background-color: rgba(0, 0, 0, 220);
+            }
+        """)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._click_callback = None
+
+    def set_click_callback(self, callback):
+        self._click_callback = callback
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._click_callback:
+            self._click_callback()
+        super().mousePressEvent(event)
+
+
 class ClickableSlider(QSlider):
     """A slider that responds to mouse clicks anywhere on the track."""
 
@@ -305,6 +341,10 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(content_area, stretch=1)
 
+        # Welcome overlay (prompts user to open file)
+        self._welcome_overlay = WelcomeOverlay(self._video_widget)
+        self._welcome_overlay.set_click_callback(self._open_file)
+
         # Notification overlay (on top of video)
         self._notification = NotificationOverlay(self._video_widget)
 
@@ -312,11 +352,13 @@ class MainWindow(QMainWindow):
         self._time_label = QLabel("00:00.000 / 00:00.000", self._video_widget)
         self._time_label.setStyleSheet("color: white; font-family: monospace; background: transparent;")
         self._time_label.adjustSize()
+        self._time_label.hide()  # Hide until file is loaded
 
         # Frame info overlay (bottom right of video, no background)
         self._frame_label = QLabel("Frame: 0 / 0", self._video_widget)
         self._frame_label.setStyleSheet("color: white; font-family: monospace; background: transparent;")
         self._frame_label.adjustSize()
+        self._frame_label.hide()  # Hide until file is loaded
 
         # Controls panel
         controls_panel = QWidget()
@@ -374,6 +416,11 @@ class MainWindow(QMainWindow):
         
         try:
             self._controller = PlaybackController(filepath)
+            
+            # Hide welcome overlay, show info labels
+            self._welcome_overlay.hide()
+            self._time_label.show()
+            self._frame_label.show()
             
             # Enable timeline slider
             self._timeline_slider.setEnabled(True)
