@@ -295,8 +295,9 @@ class MainWindow(QMainWindow):
         self._video_widget = VideoWidget()
         content_layout.addWidget(self._video_widget, stretch=1)
 
-        # Audio mixer panel (right side)
+        # Audio mixer panel (right side, hidden by default)
         self._audio_mixer = AudioMixerPanel()
+        self._audio_mixer.hide()
         content_layout.addWidget(self._audio_mixer)
 
         main_layout.addWidget(content_area, stretch=1)
@@ -310,11 +311,11 @@ class MainWindow(QMainWindow):
         controls_layout = QVBoxLayout(controls_panel)
         controls_layout.setContentsMargins(10, 5, 10, 5)
 
-        # Frame counter above progress bar
-        self._frame_label = QLabel("Frame: 0 / 0")
-        self._frame_label.setStyleSheet("color: white; font-family: monospace;")
-        self._frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        controls_layout.addWidget(self._frame_label)
+        # Combined time and frame display above progress bar
+        self._info_label = QLabel("00:00.000 / 00:00.000  |  Frame: 0 / 0")
+        self._info_label.setStyleSheet("color: white; font-family: monospace;")
+        self._info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        controls_layout.addWidget(self._info_label)
 
         # Timeline slider (clickable)
         self._timeline_slider = ClickableSlider(Qt.Orientation.Horizontal)
@@ -323,17 +324,7 @@ class MainWindow(QMainWindow):
         self._timeline_slider.sliderReleased.connect(self._on_slider_released)
         self._timeline_slider.valueChanged.connect(self._on_slider_value_changed)
         controls_layout.addWidget(self._timeline_slider)
-        
-        # Button row (simplified - most controls use keyboard shortcuts)
-        button_row = QHBoxLayout()
-        button_row.addStretch()
-        
-        # Time display
-        self._time_label = QLabel("00:00.000 / 00:00.000")
-        self._time_label.setStyleSheet("color: white; font-family: monospace;")
-        button_row.addWidget(self._time_label)
-        
-        controls_layout.addLayout(button_row)
+
         main_layout.addWidget(controls_panel)
         
         # Focus policy for keyboard events
@@ -404,7 +395,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Failed to load file: {e}")
             self._video_widget.clear_display()
-            self._time_label.setText(f"Error: {e}")
+            self._info_label.setText(f"Error: {e}")
     
     def _show_notification(self, text: str, duration_ms: int = 800) -> None:
         """Show a notification overlay."""
@@ -450,7 +441,7 @@ class MainWindow(QMainWindow):
             self._frames_displayed += 1
     
     def _update_time_display(self) -> None:
-        """Update the time and frame labels."""
+        """Update the combined time and frame label."""
         if not self._controller:
             return
 
@@ -464,8 +455,10 @@ class MainWindow(QMainWindow):
             secs = seconds % 60
             return f"{mins:02d}:{secs:06.3f}"
 
-        self._time_label.setText(f"{format_time(current_time)} / {format_time(duration)}")
-        self._frame_label.setText(f"Frame: {current_frame} / {total_frames}")
+        self._info_label.setText(
+            f"{format_time(current_time)} / {format_time(duration)}  |  "
+            f"Frame: {current_frame} / {total_frames}"
+        )
         
         # Update slider (without triggering signals)
         if not self._timeline_slider.isSliderDown():
@@ -604,8 +597,19 @@ class MainWindow(QMainWindow):
                 self._skip_time(-30)
             else:
                 self._skip_time(30)
+        elif key == Qt.Key.Key_A:
+            self._toggle_audio_mixer()
         else:
             super().keyPressEvent(event)
+
+    def _toggle_audio_mixer(self) -> None:
+        """Toggle audio mixer panel visibility."""
+        if self._audio_mixer.isVisible():
+            self._audio_mixer.hide()
+            self._show_notification("Mixer: Off", 600)
+        else:
+            self._audio_mixer.show()
+            self._show_notification("Mixer: On", 600)
     
     def closeEvent(self, event) -> None:
         """Handle window close."""
