@@ -942,6 +942,9 @@ class DualModeMainWindow(QMainWindow):
     def _on_slider_value_changed(self, value: int) -> None:
         if self._frame_controller and self._timeline_slider.isSliderDown():
             self._frame_controller.seek_to_frame(value)
+            # Also sync native player during drag for visual feedback
+            if self._mode == PlaybackMode.NATIVE and self._native_player:
+                self._native_player.seek(self._frame_controller.current_time)
             self._display_current_frame()
             self._update_time_display()
 
