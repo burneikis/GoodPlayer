@@ -139,7 +139,15 @@ class VideoDecoder:
     
     def _open(self, filepath: str) -> None:
         """Open video file and extract metadata."""
-        self._container = av.open(filepath)
+        # Try to open with hardware acceleration
+        try:
+            self._container = av.open(filepath, options={'hwaccel': 'auto'})
+            logger.info("Opened video with hardware acceleration")
+        except Exception:
+            # Fallback to software decoding
+            self._container = av.open(filepath)
+            logger.info("Opened video with software decoding")
+        
         self._stream = self._container.streams.video[0]
         
         # Enable multi-threaded decoding

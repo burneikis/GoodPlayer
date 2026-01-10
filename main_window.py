@@ -259,6 +259,11 @@ class VideoWidget(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setStyleSheet("background-color: black;")
         self._aspect_ratio: float = 16 / 9
+        self._use_fast_scaling: bool = True  # Default to fast scaling
+    
+    def set_fast_scaling(self, enabled: bool) -> None:
+        """Enable or disable fast scaling mode."""
+        self._use_fast_scaling = enabled
     
     def display_frame(self, frame: np.ndarray) -> None:
         """Display a numpy RGB frame."""
@@ -276,11 +281,17 @@ class VideoWidget(QLabel):
         )
         
         # Scale to fit widget while maintaining aspect ratio
+        # FastTransformation is much faster but lower quality
         pixmap = QPixmap.fromImage(qimage)
+        transform_mode = (
+            Qt.TransformationMode.FastTransformation 
+            if self._use_fast_scaling 
+            else Qt.TransformationMode.SmoothTransformation
+        )
         scaled = pixmap.scaled(
             self.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
+            transform_mode
         )
         
         self.setPixmap(scaled)
@@ -294,8 +305,9 @@ class VideoWidget(QLabel):
 class MainWindow(QMainWindow):
     """Main application window with performance monitoring."""
     
-    REFRESH_INTERVAL_MS = 16
+    DEFAULT_REFRESH_INTERVAL_MS = 16  # Fallback for ~60fps
     STATS_INTERVAL_MS = 5000  # Log stats every 5 seconds
+    REFRESH_HEADROOM_FACTOR = 0.85  # Target 85% of frame time for headroom
     
     def __init__(self):
         super().__init__()
@@ -303,6 +315,7 @@ class MainWindow(QMainWindow):
         self._controller: Optional[PlaybackController] = None
         self._last_displayed_frame: int = -1
         self._master_volume: float = 1.0
+        self._use_fast_scaling: bool = True  # Fast scaling for better performance
 
         # Performance tracking
         self._frames_displayed = 0
@@ -383,7 +396,7 @@ class MainWindow(QMainWindow):
     def _setup_timers(self) -> None:
         """Setup refresh and stats timers."""
         self._refresh_timer = QTimer()
-        self._refresh_timer.setInterval(self.REFRESH_INTERVAL_MS)
+        self._refresh_timer.setInterval(self.DEFAULT_REFRESH_INTERVAL_MS)
         self._refresh_timer.timeout.connect(self._refresh_display)
         
         self._stats_timer = QTimer()
@@ -435,6 +448,21 @@ class MainWindow(QMainWindow):
                 self._on_track_volume_changed,
                 self._on_track_mute_changed
             )
+
+            # Calculate optimal refresh interval based on video FPS
+            video_fps = self._controller.fps
+            if video_fps > 0:
+                # Calculate interval with headroom for processing
+                frame_time_ms = 1000.0 / video_fps
+                refresh_interval = max(1, int(frame_time_ms * self.REFRESH_HEADROOM_FACTOR))
+            else:
+                refresh_interval = self.DEFAULT_REFRESH_INTERVAL_MS
+            
+            self._refresh_timer.setInterval(refresh_interval)
+            logger.info(f"Video FPS: {video_fps:.2f}, refresh interval: {refresh_interval}ms")
+
+            # Sync fast scaling setting to video widget
+            self._video_widget.set_fast_scaling(self._use_fast_scaling)
 
             # Display first frame
             self._display_current_frame()
@@ -681,6 +709,8 @@ class MainWindow(QMainWindow):
             self._skip_time(30)  # } = 30s forward
         elif key == Qt.Key.Key_A:
             self._toggle_audio_mixer()
+        elif key == Qt.Key.Key_Q:
+            self._toggle_fast_scaling()
         else:
             super().keyPressEvent(event)
 
@@ -692,6 +722,16 @@ class MainWindow(QMainWindow):
         else:
             self._audio_mixer.show()
             self._show_notification("Mixer: On", 600)
+    
+    def _toggle_fast_scaling(self) -> None:
+        """Toggle between fast and smooth scaling."""
+        self._use_fast_scaling = not self._use_fast_scaling
+        self._video_widget.set_fast_scaling(self._use_fast_scaling)
+        mode = "Fast" if self._use_fast_scaling else "Smooth"
+        self._show_notification(f"Scaling: {mode}", 600)
+        # Refresh current frame to show the change
+        if self._controller and not self._controller.is_playing:
+            self._display_current_frame()
     
     def resizeEvent(self, event) -> None:
         """Handle window resize - reposition info label overlays."""
