@@ -84,6 +84,11 @@ def create_dmg():
     print("\nCreating DMG installer...")
     
     dmg_name = 'GoodPlayer-1.0.0.dmg'
+    dmg_path = f'dist/{dmg_name}'
+    
+    # Remove old DMG if exists
+    if os.path.exists(dmg_path):
+        os.remove(dmg_path)
     
     # Check if create-dmg is available (brew install create-dmg)
     if shutil.which('create-dmg'):
@@ -93,25 +98,61 @@ def create_dmg():
             '--window-pos', '200', '120',
             '--window-size', '600', '400',
             '--icon-size', '100',
-            '--icon', 'GoodPlayer.app', '150', '190',
-            '--app-drop-link', '450', '190',
-            f'dist/{dmg_name}',
+            '--icon', 'GoodPlayer.app', '150', '185',
+            '--app-drop-link', '450', '185',
+            '--hide-extension', 'GoodPlayer.app',
+            dmg_path,
             'dist/GoodPlayer.app'
         ]
-        subprocess.run(cmd)
+        result = subprocess.run(cmd)
+        if result.returncode == 0:
+            print(f"DMG created: {dmg_path}")
+        else:
+            print("create-dmg failed, falling back to manual method")
+            _create_dmg_manual(dmg_path)
     else:
-        # Fallback to hdiutil
-        cmd = [
-            'hdiutil', 'create',
-            '-volname', 'GoodPlayer',
-            '-srcfolder', 'dist/GoodPlayer.app',
-            '-ov',
-            '-format', 'UDZO',
-            f'dist/{dmg_name}'
-        ]
-        subprocess.run(cmd)
+        _create_dmg_manual(dmg_path)
+
+def _create_dmg_manual(dmg_path: str):
+    """Create DMG manually using hdiutil with Applications symlink."""
+    staging_dir = 'dist/dmg_staging'
     
-    print(f"DMG created: dist/{dmg_name}")
+    # Clean up staging directory
+    if os.path.exists(staging_dir):
+        shutil.rmtree(staging_dir)
+    os.makedirs(staging_dir)
+    
+    # Copy the app to staging
+    print("Copying GoodPlayer.app to staging...")
+    shutil.copytree('dist/GoodPlayer.app', f'{staging_dir}/GoodPlayer.app', symlinks=True)
+    
+    # Create Applications symlink
+    print("Creating Applications symlink...")
+    os.symlink('/Applications', f'{staging_dir}/Applications')
+    
+    # Create the DMG
+    print("Creating DMG image...")
+    cmd = [
+        'hdiutil', 'create',
+        '-volname', 'GoodPlayer',
+        '-srcfolder', staging_dir,
+        '-ov',
+        '-format', 'UDZO',  # Compressed
+        dmg_path
+    ]
+    result = subprocess.run(cmd)
+    
+    # Clean up staging
+    shutil.rmtree(staging_dir)
+    
+    if result.returncode == 0:
+        print(f"DMG created: {dmg_path}")
+        print("\nThe DMG contains:")
+        print("  - GoodPlayer.app")
+        print("  - Applications folder shortcut")
+        print("\nUsers can drag GoodPlayer.app to Applications to install.")
+    else:
+        print("ERROR: Failed to create DMG")
 
 def create_windows_installer():
     """Create Windows installer using NSIS (if available)."""
