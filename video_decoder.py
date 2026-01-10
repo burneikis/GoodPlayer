@@ -90,12 +90,12 @@ class VideoDecoder:
     and background prefetching.
     """
     
-    # Memory budget for cache (in bytes) - ~500MB default
-    CACHE_MEMORY_BUDGET = 500 * 1024 * 1024
-    PREFETCH_AHEAD = 30  # Frames to prefetch ahead
+    # Memory budget for cache (in bytes) - ~800MB default for high-fps content
+    CACHE_MEMORY_BUDGET = 800 * 1024 * 1024
+    PREFETCH_AHEAD = 90  # Frames to prefetch ahead (1.5s at 60fps)
     PREFETCH_BEHIND = 10  # Frames to keep behind
     
-    def __init__(self, filepath: str, cache_seconds: float = 2.0):
+    def __init__(self, filepath: str, cache_seconds: float = 3.0):
         self.filepath = filepath
         self._container: Optional[av.container] = None
         self._stream: Optional[av.video.VideoStream] = None
@@ -260,6 +260,7 @@ class VideoDecoder:
                     target = self._prefetch_target
                 
                 # Prefetch frames ahead of target
+                frames_prefetched = 0
                 for offset in range(1, self.PREFETCH_AHEAD + 1):
                     if not self._prefetch_running:
                         break
@@ -267,14 +268,16 @@ class VideoDecoder:
                     frame_idx = target + offset
                     if 0 <= frame_idx < self.total_frames and frame_idx not in self._cache:
                         self._decode_frame_internal(frame_idx)
+                        frames_prefetched += 1
                     
-                    # Check if target changed
+                    # Check if target changed significantly - allow more drift before restarting
                     with self._prefetch_lock:
-                        if abs(self._prefetch_target - target) > 5:
+                        if abs(self._prefetch_target - target) > 15:
                             break
                 
-                # Sleep before next prefetch cycle
-                threading.Event().wait(0.05)
+                # Sleep before next prefetch cycle - shorter sleep if we're actively prefetching
+                sleep_time = 0.005 if frames_prefetched > 0 else 0.016
+                threading.Event().wait(sleep_time)
                 
             except Exception as e:
                 logger.debug(f"Prefetch error: {e}")
