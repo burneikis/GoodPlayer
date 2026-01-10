@@ -164,10 +164,24 @@ class AudioMixerPanel(QFrame):
 
 
 class NotificationOverlay(QLabel):
-    """Overlay widget for showing action notifications."""
+    """
+    Overlay widget for showing action notifications.
+    Uses a frameless top-level window to render over video hardware overlays.
+    """
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        # Create as top-level frameless window to render over QVideoWidget
+        super().__init__(None)  # No parent - top level window
+        self._parent_widget = parent
+        
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.Tool |  # Don't show in taskbar
+            Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("""
             background-color: rgba(0, 0, 0, 180);
@@ -185,12 +199,17 @@ class NotificationOverlay(QLabel):
     def show_notification(self, text: str, duration_ms: int = 1000) -> None:
         self.setText(text)
         self.adjustSize()
-        if self.parent():
-            parent_rect = self.parent().rect()
+        
+        # Position relative to parent widget's global position
+        if self._parent_widget:
+            parent_global = self._parent_widget.mapToGlobal(self._parent_widget.rect().topLeft())
+            parent_rect = self._parent_widget.rect()
             margin = 10
-            self.move(parent_rect.width() - self.width() - margin, margin)
+            x = parent_global.x() + parent_rect.width() - self.width() - margin
+            y = parent_global.y() + margin
+            self.move(x, y)
+        
         self.show()
-        self.raise_()
         self._timer.start(duration_ms)
 
 
@@ -378,7 +397,7 @@ class DualModeMainWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        # Video container (stacked widget for switching between modes)
+        # Video container with overlay support
         self._video_container = QWidget()
         self._video_container.setStyleSheet("background-color: black;")
         self._video_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -407,24 +426,32 @@ class DualModeMainWindow(QMainWindow):
 
         main_layout.addWidget(content_area, stretch=1)
 
-        # Overlays (on top of video container)
-        self._welcome_overlay = WelcomeOverlay(self._video_container)
+        # Transparent overlay container (sits on top of video_container)
+        # This widget is a direct child of video_container but not in the layout
+        self._overlay_container = QWidget(self._video_container)
+        self._overlay_container.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self._overlay_container.setStyleSheet("background: transparent;")
+        self._overlay_container.show()  # Must explicitly show since not in layout
+        
+        # Overlays (parented to overlay container for proper z-order)
+        self._welcome_overlay = WelcomeOverlay(self._overlay_container)
         self._welcome_overlay.set_click_callback(self._open_file)
-        self._welcome_overlay.raise_()  # Ensure it's on top of the stacked widget
 
+        # Notification uses video_container as reference for positioning
+        # It's a top-level window so it can render over QVideoWidget
         self._notification = NotificationOverlay(self._video_container)
         
         # Mode indicator
-        self._mode_indicator = ModeIndicator(self._video_container)
+        self._mode_indicator = ModeIndicator(self._overlay_container)
 
         # Time info overlay
-        self._time_label = QLabel("00:00.000 / 00:00.000", self._video_container)
+        self._time_label = QLabel("00:00.000 / 00:00.000", self._overlay_container)
         self._time_label.setStyleSheet("color: white; font-family: monospace; background: transparent;")
         self._time_label.adjustSize()
         self._time_label.hide()
 
         # Frame info overlay
-        self._frame_label = QLabel("Frame: 0 / 0", self._video_container)
+        self._frame_label = QLabel("Frame: 0 / 0", self._overlay_container)
         self._frame_label.setStyleSheet("color: white; font-family: monospace; background: transparent;")
         self._frame_label.adjustSize()
         self._frame_label.hide()
@@ -619,6 +646,7 @@ class DualModeMainWindow(QMainWindow):
             self._video_stack.setCurrentIndex(0)
             self._display_current_frame()
             self._update_time_display()
+            self._update_overlay_geometry()  # Ensure overlays are properly positioned
             
             # Start timers
             self._refresh_timer.start()
@@ -756,7 +784,7 @@ class DualModeMainWindow(QMainWindow):
 
         self._time_label.setText(f"{format_time(current_time)} / {format_time(duration)}")
         self._frame_label.setText(f"Frame: {current_frame} / {total_frames}")
-        self._update_info_label_positions()
+        self._update_overlay_geometry()
 
         if not self._timeline_slider.isSliderDown():
             self._timeline_slider.blockSignals(True)
@@ -956,17 +984,20 @@ class DualModeMainWindow(QMainWindow):
     
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._update_info_label_positions()
+        self._update_overlay_geometry()
     
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        # Position welcome overlay after window is shown
-        if self._welcome_overlay.isVisible():
-            self._welcome_overlay.update_position()
+        self._update_overlay_geometry()
 
-    def _update_info_label_positions(self) -> None:
-        margin = 10
+    def _update_overlay_geometry(self) -> None:
+        """Update overlay container size and position all overlays."""
+        # Resize overlay container to match video container
         container_rect = self._video_container.rect()
+        self._overlay_container.setGeometry(container_rect)
+        self._overlay_container.raise_()
+        
+        margin = 10
 
         self._time_label.adjustSize()
         self._time_label.move(margin, container_rect.height() - self._time_label.height() - margin)
