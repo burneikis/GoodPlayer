@@ -308,17 +308,17 @@ class MainWindow(QMainWindow):
         # Notification overlay (on top of video)
         self._notification = NotificationOverlay(self._video_widget)
 
+        # Time/frame info overlay (bottom right of video, no background)
+        self._info_label = QLabel("00:00.000 / 00:00.000  |  Frame: 0 / 0", self._video_widget)
+        self._info_label.setStyleSheet("color: white; font-family: monospace; background: transparent;")
+        self._info_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._info_label.adjustSize()
+
         # Controls panel
         controls_panel = QWidget()
         controls_panel.setStyleSheet("background-color: #2b2b2b;")
         controls_layout = QVBoxLayout(controls_panel)
         controls_layout.setContentsMargins(10, 5, 10, 5)
-
-        # Combined time and frame display above progress bar
-        self._info_label = QLabel("00:00.000 / 00:00.000  |  Frame: 0 / 0")
-        self._info_label.setStyleSheet("color: white; font-family: monospace;")
-        self._info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        controls_layout.addWidget(self._info_label)
 
         # Timeline slider (clickable)
         self._timeline_slider = ClickableSlider(Qt.Orientation.Horizontal)
@@ -471,7 +471,8 @@ class MainWindow(QMainWindow):
             f"{format_time(current_time)} / {format_time(duration)}  |  "
             f"Frame: {current_frame} / {total_frames}"
         )
-        
+        self._update_info_label_position()
+
         # Update slider (without triggering signals)
         if not self._timeline_slider.isSliderDown():
             self._timeline_slider.blockSignals(True)
@@ -637,6 +638,21 @@ class MainWindow(QMainWindow):
             self._audio_mixer.show()
             self._show_notification("Mixer: On", 600)
     
+    def resizeEvent(self, event) -> None:
+        """Handle window resize - reposition info label overlay."""
+        super().resizeEvent(event)
+        self._update_info_label_position()
+
+    def _update_info_label_position(self) -> None:
+        """Position the info label at bottom right of video widget."""
+        self._info_label.adjustSize()
+        margin = 10
+        video_rect = self._video_widget.rect()
+        self._info_label.move(
+            video_rect.width() - self._info_label.width() - margin,
+            video_rect.height() - self._info_label.height() - margin
+        )
+
     def closeEvent(self, event) -> None:
         """Handle window close."""
         self._refresh_timer.stop()
