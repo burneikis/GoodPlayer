@@ -779,6 +779,12 @@ class DualModeMainWindow(QMainWindow):
             return
         self._last_step_time = current_time_ms
 
+        # Stop audio if we were playing (do this BEFORE setting _playing = False)
+        if self._playing:
+            self._frame_controller.audio_engine.pause()
+            if self._native_player and self._native_player.is_playing:
+                self._native_player.pause()
+
         # Stepping always means we're paused
         self._playing = False
         
@@ -802,6 +808,12 @@ class DualModeMainWindow(QMainWindow):
         if current_time_ms - self._last_step_time < self.MIN_STEP_INTERVAL_MS:
             return
         self._last_step_time = current_time_ms
+
+        # Stop audio if we were playing (do this BEFORE setting _playing = False)
+        if self._playing:
+            self._frame_controller.audio_engine.pause()
+            if self._native_player and self._native_player.is_playing:
+                self._native_player.pause()
 
         # Stepping always means we're paused
         self._playing = False
