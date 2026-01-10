@@ -1,4 +1,8 @@
-av>=10.0.0
+# Core dependencies
+PyQt6>=6.4.0
 numpy>=1.24.0
 sounddevice>=0.4.6
-PyQt6>=6.5.0
+av>=10.0.0
+
+# Build tools (optional - only needed for creating executables)
+pyinstaller>=6.0.0
