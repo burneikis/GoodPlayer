@@ -259,10 +259,6 @@ class FrameAccurateVideoWidget(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setStyleSheet("background-color: black;")
         self._aspect_ratio: float = 16 / 9
-        self._use_fast_scaling: bool = True
-    
-    def set_fast_scaling(self, enabled: bool) -> None:
-        self._use_fast_scaling = enabled
     
     def display_frame(self, frame: np.ndarray) -> None:
         if frame is None:
@@ -275,12 +271,7 @@ class FrameAccurateVideoWidget(QLabel):
         qimage = QImage(frame.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
         
         pixmap = QPixmap.fromImage(qimage)
-        transform_mode = (
-            Qt.TransformationMode.FastTransformation 
-            if self._use_fast_scaling 
-            else Qt.TransformationMode.SmoothTransformation
-        )
-        scaled = pixmap.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio, transform_mode)
+        scaled = pixmap.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         self.setPixmap(scaled)
     
     def clear_display(self) -> None:
@@ -350,7 +341,6 @@ class DualModeMainWindow(QMainWindow):
         # State
         self._last_displayed_frame: int = -1
         self._master_volume: float = 1.0
-        self._use_fast_scaling: bool = True
         self._was_playing_before_seek: bool = False
 
         # Performance tracking
@@ -611,9 +601,6 @@ class DualModeMainWindow(QMainWindow):
             
             self._refresh_timer.setInterval(refresh_interval)
             logger.info(f"Video FPS: {video_fps:.2f}, refresh interval: {refresh_interval}ms")
-
-            # Setup video widget
-            self._frame_video_widget.set_fast_scaling(self._use_fast_scaling)
 
             # Start in frame-accurate mode, display first frame
             self._mode = PlaybackMode.FRAME_ACCURATE
@@ -943,8 +930,6 @@ class DualModeMainWindow(QMainWindow):
             self._skip_time(30)
         elif key == Qt.Key.Key_A:
             self._toggle_audio_mixer()
-        elif key == Qt.Key.Key_Q:
-            self._toggle_fast_scaling()
         elif key == Qt.Key.Key_M:
             self._toggle_playback_mode()  # New: M to toggle mode
         else:
@@ -957,14 +942,6 @@ class DualModeMainWindow(QMainWindow):
         else:
             self._audio_mixer.show()
             self._show_notification("Mixer: On", 600)
-    
-    def _toggle_fast_scaling(self) -> None:
-        self._use_fast_scaling = not self._use_fast_scaling
-        self._frame_video_widget.set_fast_scaling(self._use_fast_scaling)
-        mode = "Fast" if self._use_fast_scaling else "Smooth"
-        self._show_notification(f"Scaling: {mode}", 600)
-        if self._frame_controller and not self._is_playing():
-            self._display_current_frame()
     
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
