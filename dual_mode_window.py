@@ -262,24 +262,45 @@ class WelcomeOverlay(QLabel):
 
 
 class ClickableSlider(QSlider):
-    """A slider that responds to mouse clicks anywhere on the track."""
+    """A slider that responds to mouse clicks anywhere on the track and supports dragging."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._dragging = False
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if self.orientation() == Qt.Orientation.Horizontal:
-                value = self.minimum() + (self.maximum() - self.minimum()) * event.position().x() / self.width()
-            else:
-                value = self.minimum() + (self.maximum() - self.minimum()) * (self.height() - event.position().y()) / self.height()
-            self.setValue(int(value))
+            self._dragging = True
+            self._update_value_from_pos(event.position().x())
             self.sliderPressed.emit()
             event.accept()
         else:
             super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event):
+        if self._dragging:
+            self._update_value_from_pos(event.position().x())
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton and self._dragging:
+            self._dragging = False
             self.sliderReleased.emit()
-        super().mouseReleaseEvent(event)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def _update_value_from_pos(self, x_pos: float) -> None:
+        """Update slider value based on x position."""
+        if self.orientation() == Qt.Orientation.Horizontal:
+            ratio = max(0.0, min(1.0, x_pos / self.width()))
+            value = self.minimum() + (self.maximum() - self.minimum()) * ratio
+        else:
+            ratio = max(0.0, min(1.0, (self.height() - x_pos) / self.height()))
+            value = self.minimum() + (self.maximum() - self.minimum()) * ratio
+        self.setValue(int(value))
 
 
 class FrameAccurateVideoWidget(QLabel):
