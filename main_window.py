@@ -461,6 +461,12 @@ class MainWindow(QMainWindow):
         duration = self._controller.duration
         current_frame = self._controller.current_frame
         total_frames = self._controller.total_frames
+        last_frame = total_frames - 1
+
+        # Clamp to final frame when at or past the end
+        if current_frame >= last_frame:
+            current_frame = last_frame
+            current_time = duration
 
         def format_time(seconds: float) -> str:
             mins = int(seconds) // 60
