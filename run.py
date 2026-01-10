@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GoodPlayer3 - Launcher script
+GoodPlayer - Launcher script
 """
 
 from main_window import main

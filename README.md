@@ -1,4 +1,4 @@
-# GoodPlayer3
+#GoodPlayer
 
 A frame-accurate video player with multi-track audio support, built with Python, PyAV, and PyQt6.
 

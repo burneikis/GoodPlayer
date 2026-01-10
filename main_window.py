@@ -278,7 +278,7 @@ class MainWindow(QMainWindow):
     
     def _setup_ui(self) -> None:
         """Initialize the user interface."""
-        self.setWindowTitle("GoodPlayer3")
+        self.setWindowTitle("GoodPlayer")
         self.setMinimumSize(800, 600)
         
         # Central widget
@@ -398,7 +398,7 @@ class MainWindow(QMainWindow):
             self._stats_timer.start()
             self._frame_timer.start()
             
-            self.setWindowTitle(f"GoodPlayer3 - {filepath}")
+            self.setWindowTitle(f"GoodPlayer - {filepath}")
             
         except Exception as e:
             logger.error(f"Failed to load file: {e}")
