@@ -16,7 +16,8 @@ A frame-accurate video player with multi-track audio support, built with Python,
 ```bash
 # Create virtual environment
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Mac/Linux
+# On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -41,36 +42,6 @@ python run.py [video_file]
 | `End` | Go to end |
 | `S` | Print stats to console |
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      MainWindow (PyQt6)                     │
-│  - Video display (QLabel + QImage)                          │
-│  - Timeline slider                                          │
-│  - Keyboard input handling                                  │
-│  - 60fps refresh timer                                      │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   PlaybackController                        │
-│  - Coordinates video and audio                              │
-│  - Play/Pause/Seek/Step commands                            │
-│  - PlaybackClock (audio-master)                             │
-└─────────────────────────────────────────────────────────────┘
-                    │                   │
-                    ▼                   ▼
-┌───────────────────────────┐ ┌───────────────────────────────┐
-│      VideoDecoder         │ │        AudioEngine            │
-│  - PyAV video decoding    │ │  - PyAV audio decoding        │
-│  - Keyframe index         │ │  - Multi-track resampling     │
-│  - LRU frame cache        │ │  - Ring buffer mixing         │
-│  - Background prefetch    │ │  - sounddevice output         │
-│  - Worker thread          │ │  - Master playback clock      │
-└───────────────────────────┘ └───────────────────────────────┘
-```
-
 ## Key Design Decisions
 
 1. **Audio is the master clock**: Video frames are requested based on audio time, ensuring perfect A/V sync.
@@ -88,7 +59,3 @@ python run.py [video_file]
 - NumPy 1.24+
 - sounddevice 0.4+
 - PyQt6 6.5+
-
-## License
-
-MIT
