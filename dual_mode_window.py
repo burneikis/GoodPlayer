@@ -280,6 +280,7 @@ class ClickableSlider(QSlider):
     def mouseMoveEvent(self, event):
         if self._dragging:
             self._update_value_from_pos(event.position().x())
+            self.sliderMoved.emit(self.value())  # Emit sliderMoved during drag
             event.accept()
         else:
             super().mouseMoveEvent(event)
@@ -291,6 +292,10 @@ class ClickableSlider(QSlider):
             event.accept()
         else:
             super().mouseReleaseEvent(event)
+
+    def isSliderDown(self) -> bool:
+        """Override to use our custom dragging state."""
+        return self._dragging or super().isSliderDown()
 
     def _update_value_from_pos(self, x_pos: float) -> None:
         """Update slider value based on x position."""
@@ -931,8 +936,8 @@ class DualModeMainWindow(QMainWindow):
     def _on_slider_released(self) -> None:
         if self._frame_controller:
             self._frame_controller.seek_to_frame(self._timeline_slider.value())
+            # Always sync native player position (it may be used when play resumes)
             if self._native_player:
-                # Sync native player position
                 self._native_player.seek(self._frame_controller.current_time)
             self._display_current_frame()
             self._update_time_display()
@@ -942,8 +947,8 @@ class DualModeMainWindow(QMainWindow):
     def _on_slider_value_changed(self, value: int) -> None:
         if self._frame_controller and self._timeline_slider.isSliderDown():
             self._frame_controller.seek_to_frame(value)
-            # Also sync native player during drag for visual feedback
-            if self._mode == PlaybackMode.NATIVE and self._native_player:
+            # Always sync native player during drag for visual feedback
+            if self._native_player:
                 self._native_player.seek(self._frame_controller.current_time)
             self._display_current_frame()
             self._update_time_display()
