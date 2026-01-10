@@ -49,6 +49,7 @@ class AudioTrackWidget(QFrame):
     def _setup_ui(self):
         self.setFrameStyle(QFrame.Shape.StyledPanel)
         self.setStyleSheet("background-color: #3a3a3a; border-radius: 4px; padding: 5px;")
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -110,6 +111,7 @@ class AudioMixerPanel(QFrame):
         super().__init__(parent)
         self._track_widgets = []
         self._setup_ui()
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def _setup_ui(self):
         self.setStyleSheet("background-color: #2b2b2b;")
@@ -128,8 +130,10 @@ class AudioMixerPanel(QFrame):
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("border: none;")
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self._tracks_container = QWidget()
+        self._tracks_container.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._tracks_layout = QVBoxLayout(self._tracks_container)
         self._tracks_layout.setContentsMargins(0, 0, 0, 0)
         self._tracks_layout.setSpacing(5)
