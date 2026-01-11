@@ -10,7 +10,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from src.audio_engine import AudioEngine  # If used, update to src import
+# Try to import mpv, provide fallback info if not available
 try:
     import mpv
     MPV_AVAILABLE = True

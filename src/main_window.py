@@ -1,295 +1,28 @@
+
 """
 Stage 4 & 5: PyQt UI with Performance Monitoring
-Main window for video playback with keyboard controls.
+Main window for video playback with keyboard controls (legacy mode).
 """
 
 import sys
 import logging
-import numpy as np
-from typing import Optional
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QSlider, QFileDialog, QSizePolicy, QCheckBox,
-    QFrame, QScrollArea
+    QLabel, QFileDialog
 )
 from PyQt6.QtCore import Qt, QTimer, QElapsedTimer
-from PyQt6.QtGui import QImage, QPixmap, QKeyEvent
+from PyQt6.QtGui import QKeyEvent
 
+# Use absolute imports for local modules
 from src.playback_controller import PlaybackController
+from .widgets import (
+    AudioMixerPanel, NotificationOverlay, WelcomeOverlay,
+    ClickableSlider, VideoWidget, format_time
+)
+from .theme import apply_dark_theme
 
 logger = logging.getLogger(__name__)
-
-
-class AudioTrackWidget(QFrame):
-    """Widget for controlling a single audio track."""
-
-    def __init__(self, track_index: int, parent=None):
-        super().__init__(parent)
-        self.track_index = track_index
-        self._setup_ui()
-
-    def _setup_ui(self):
-        self.setFrameStyle(QFrame.Shape.StyledPanel)
-        self.setStyleSheet("background-color: #3a3a3a; border-radius: 4px; padding: 5px;")
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(5)
-
-        # Track label
-        self._label = QLabel(f"Track {self.track_index + 1}")
-        self._label.setStyleSheet("color: white; font-weight: bold;")
-        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self._label)
-
-        # Volume slider (vertical)
-        self._volume_slider = QSlider(Qt.Orientation.Vertical)
-        self._volume_slider.setRange(0, 100)
-        self._volume_slider.setValue(100)
-        self._volume_slider.setMinimumHeight(80)
-        self._volume_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._volume_slider.valueChanged.connect(self._on_volume_changed)
-        layout.addWidget(self._volume_slider, alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        # Volume label
-        self._volume_label = QLabel("100%")
-        self._volume_label.setStyleSheet("color: #aaa;")
-        self._volume_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self._volume_label)
-
-        # Mute checkbox
-        self._mute_checkbox = QCheckBox("Mute")
-        self._mute_checkbox.setStyleSheet("color: white;")
-        self._mute_checkbox.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._mute_checkbox.stateChanged.connect(self._on_mute_changed)
-        layout.addWidget(self._mute_checkbox, alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        self._volume_callback = None
-        self._mute_callback = None
-
-    def set_volume_callback(self, callback):
-        self._volume_callback = callback
-
-    def set_mute_callback(self, callback):
-        self._mute_callback = callback
-
-    def _on_volume_changed(self, value: int):
-        self._volume_label.setText(f"{value}%")
-        if self._volume_callback:
-            self._volume_callback(self.track_index, value / 100.0)
-
-    def _on_mute_changed(self, state: int):
-        if self._mute_callback:
-            self._mute_callback(self.track_index, state == Qt.CheckState.Checked.value)
-
-    def set_volume(self, volume: float):
-        self._volume_slider.blockSignals(True)
-        self._volume_slider.setValue(int(volume * 100))
-        self._volume_label.setText(f"{int(volume * 100)}%")
-        self._volume_slider.blockSignals(False)
-
-
-class AudioMixerPanel(QFrame):
-    """Panel for audio mixing controls."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._track_widgets = []
-        self._setup_ui()
-
-    def _setup_ui(self):
-        self.setStyleSheet("background-color: #2b2b2b;")
-        self.setFixedWidth(120)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
-
-        # Header
-        header = QLabel("Audio Mixer")
-        header.setStyleSheet("color: white; font-weight: bold; font-size: 12px;")
-        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(header)
-
-        # Scroll area for tracks
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("border: none;")
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-        self._tracks_container = QWidget()
-        self._tracks_layout = QVBoxLayout(self._tracks_container)
-        self._tracks_layout.setContentsMargins(0, 0, 0, 0)
-        self._tracks_layout.setSpacing(5)
-        self._tracks_layout.addStretch()
-
-        scroll.setWidget(self._tracks_container)
-        layout.addWidget(scroll)
-
-        # Placeholder when no tracks
-        self._no_tracks_label = QLabel("No audio\ntracks")
-        self._no_tracks_label.setStyleSheet("color: #666;")
-        self._no_tracks_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._tracks_layout.insertWidget(0, self._no_tracks_label)
-
-    def setup_tracks(self, num_tracks: int, volume_callback, mute_callback):
-        """Setup track widgets for the given number of audio tracks."""
-        # Clear existing widgets
-        for widget in self._track_widgets:
-            self._tracks_layout.removeWidget(widget)
-            widget.deleteLater()
-        self._track_widgets.clear()
-
-        self._no_tracks_label.setVisible(num_tracks == 0)
-
-        for i in range(num_tracks):
-            track_widget = AudioTrackWidget(i)
-            track_widget.set_volume_callback(volume_callback)
-            track_widget.set_mute_callback(mute_callback)
-            self._track_widgets.append(track_widget)
-            self._tracks_layout.insertWidget(i, track_widget)
-
-    def set_track_volume(self, track_index: int, volume: float):
-        if 0 <= track_index < len(self._track_widgets):
-            self._track_widgets[track_index].set_volume(volume)
-
-
-class NotificationOverlay(QLabel):
-    """Overlay widget for showing action notifications."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setStyleSheet("""
-            background-color: rgba(0, 0, 0, 180);
-            color: white;
-            font-size: 18px;
-            font-weight: bold;
-            padding: 10px 20px;
-            border-radius: 8px;
-        """)
-        self.hide()
-        self._timer = QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self.hide)
-
-    def show_notification(self, text: str, duration_ms: int = 1000) -> None:
-        """Show a notification that fades after duration."""
-        self.setText(text)
-        self.adjustSize()
-        # Position in top right of parent
-        if self.parent():
-            parent_rect = self.parent().rect()
-            margin = 10
-            self.move(
-                parent_rect.width() - self.width() - margin,
-                margin
-            )
-        self.show()
-        self.raise_()
-        self._timer.start(duration_ms)
-
-
-class WelcomeOverlay(QLabel):
-    """Overlay widget prompting user to open a file."""
-
-    clicked = None  # Will be set as a callback
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setText("Click or drop a video here\nor press Ctrl/Cmd+O to Open")
-        self.setStyleSheet("""
-            QLabel {
-                background-color: rgba(0, 0, 0, 200);
-                color: #aaaaaa;
-                font-size: 20px;
-                padding: 40px;
-                border: 2px dashed #555555;
-                border-radius: 12px;
-            }
-            QLabel:hover {
-                color: #ffffff;
-                border-color: #888888;
-                background-color: rgba(0, 0, 0, 220);
-            }
-        """)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._click_callback = None
-
-    def set_click_callback(self, callback):
-        self._click_callback = callback
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self._click_callback:
-            self._click_callback()
-        super().mousePressEvent(event)
-
-
-class ClickableSlider(QSlider):
-    """A slider that responds to mouse clicks anywhere on the track."""
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            # Calculate value from click position
-            if self.orientation() == Qt.Orientation.Horizontal:
-                value = self.minimum() + (self.maximum() - self.minimum()) * event.position().x() / self.width()
-            else:
-                value = self.minimum() + (self.maximum() - self.minimum()) * (self.height() - event.position().y()) / self.height()
-            self.setValue(int(value))
-            self.sliderPressed.emit()
-            event.accept()
-        else:
-            super().mousePressEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.sliderReleased.emit()
-        super().mouseReleaseEvent(event)
-
-
-class VideoWidget(QLabel):
-    """Widget for displaying video frames."""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setMinimumSize(640, 360)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setStyleSheet("background-color: black;")
-        self._aspect_ratio: float = 16 / 9
-    
-    def display_frame(self, frame: np.ndarray) -> None:
-        """Display a numpy RGB frame."""
-        if frame is None:
-            return
-        
-        height, width, channels = frame.shape
-        self._aspect_ratio = width / height
-        
-        # Create QImage from numpy array
-        bytes_per_line = channels * width
-        qimage = QImage(
-            frame.data, width, height, bytes_per_line,
-            QImage.Format.Format_RGB888
-        )
-        
-        # Scale to fit widget while maintaining aspect ratio
-        pixmap = QPixmap.fromImage(qimage)
-        scaled = pixmap.scaled(
-            self.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
-        
-        self.setPixmap(scaled)
-    
-    def clear_display(self) -> None:
-        """Clear the display."""
-        self.clear()
-        self.setStyleSheet("background-color: black;")
-
 
 class MainWindow(QMainWindow):
     """Main application window with performance monitoring."""
@@ -297,6 +30,16 @@ class MainWindow(QMainWindow):
     DEFAULT_REFRESH_INTERVAL_MS = 16  # Fallback for ~60fps
     STATS_INTERVAL_MS = 5000  # Log stats every 5 seconds
     REFRESH_HEADROOM_FACTOR = 0.85  # Target 85% of frame time for headroom
+    # Key skip times (in seconds)
+    SKIP_BACKWARD_SMALL = -5
+    SKIP_FORWARD_SMALL = 10
+    SKIP_BACKWARD_LARGE = -15
+    SKIP_FORWARD_LARGE = 30
+
+    # Notification durations (in ms)
+    NOTIFY_SHORT = 500
+    NOTIFY_MEDIUM = 600
+    NOTIFY_DEFAULT = 800
     
     def __init__(self):
         super().__init__()
@@ -483,13 +226,13 @@ class MainWindow(QMainWindow):
             return
         # Don't step past the last frame
         if self._controller.current_frame >= self._controller.total_frames - 1:
-            self._show_notification("End", 500)
+            self._show_notification("End", self.NOTIFY_SHORT)
             return
 
         self._controller.step_forward()
         self._display_current_frame()
         self._update_time_display()
-        self._show_notification("Step +1", 500)
+        self._show_notification("Step +1", self.NOTIFY_SHORT)
 
     def _step_backward(self) -> None:
         """Step backward one frame."""
@@ -497,13 +240,13 @@ class MainWindow(QMainWindow):
             return
         # Don't step before the first frame
         if self._controller.current_frame <= 0:
-            self._show_notification("Start", 500)
+            self._show_notification("Start", self.NOTIFY_SHORT)
             return
 
         self._controller.step_backward()
         self._display_current_frame()
         self._update_time_display()
-        self._show_notification("Step -1", 500)
+        self._show_notification("Step -1", self.NOTIFY_SHORT)
     
     def _display_current_frame(self) -> None:
         """Display the current frame."""
@@ -531,11 +274,6 @@ class MainWindow(QMainWindow):
         if current_frame >= last_frame:
             current_frame = last_frame
             current_time = duration
-
-        def format_time(seconds: float) -> str:
-            mins = int(seconds) // 60
-            secs = seconds % 60
-            return f"{mins:02d}:{secs:06.3f}"
 
         self._time_label.setText(f"{format_time(current_time)} / {format_time(duration)}")
         self._frame_label.setText(f"Frame: {current_frame} / {total_frames}")
@@ -635,7 +373,7 @@ class MainWindow(QMainWindow):
         # Apply to all audio tracks
         for i in range(self._controller.num_audio_tracks):
             self._controller.set_track_volume(i, self._master_volume)
-        self._show_notification(f"Volume: {int(self._master_volume * 100)}%", 600)
+        self._show_notification(f"Volume: {int(self._master_volume * 100)}%", self.NOTIFY_MEDIUM)
 
     def _skip_time(self, seconds: float) -> None:
         """Skip forward or backward by the given number of seconds."""
@@ -648,7 +386,7 @@ class MainWindow(QMainWindow):
         self._display_current_frame()
         self._update_time_display()
         sign = "+" if seconds > 0 else ""
-        self._show_notification(f"Skip {sign}{int(seconds)}s", 600)
+        self._show_notification(f"Skip {sign}{int(seconds)}s", self.NOTIFY_MEDIUM)
 
     def _on_track_volume_changed(self, track_index: int, volume: float) -> None:
         """Handle track volume change from mixer UI."""
@@ -685,13 +423,13 @@ class MainWindow(QMainWindow):
         elif key == Qt.Key.Key_Down:
             self._change_volume(-0.05)
         elif key == Qt.Key.Key_BracketLeft:
-            self._skip_time(-5)  # [ = 5s back
+            self._skip_time(self.SKIP_BACKWARD_SMALL)  # [ = 5s back
         elif key == Qt.Key.Key_BracketRight:
-            self._skip_time(10)  # ] = 10s forward
+            self._skip_time(self.SKIP_FORWARD_SMALL)  # ] = 10s forward
         elif key == Qt.Key.Key_BraceLeft:
-            self._skip_time(-15)  # { = 15s back
+            self._skip_time(self.SKIP_BACKWARD_LARGE)  # { = 15s back
         elif key == Qt.Key.Key_BraceRight:
-            self._skip_time(30)  # } = 30s forward
+            self._skip_time(self.SKIP_FORWARD_LARGE)  # } = 30s forward
         elif key == Qt.Key.Key_A:
             self._toggle_audio_mixer()
         else:
@@ -701,10 +439,10 @@ class MainWindow(QMainWindow):
         """Toggle audio mixer panel visibility."""
         if self._audio_mixer.isVisible():
             self._audio_mixer.hide()
-            self._show_notification("Mixer: Off", 600)
+            self._show_notification("Mixer: Off", self.NOTIFY_MEDIUM)
         else:
             self._audio_mixer.show()
-            self._show_notification("Mixer: On", 600)
+            self._show_notification("Mixer: On", self.NOTIFY_MEDIUM)
     
     def resizeEvent(self, event) -> None:
         """Handle window resize - reposition info label overlays."""
@@ -749,25 +487,7 @@ def main():
     )
     
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-    
-    # Dark theme
-    from PyQt6.QtGui import QPalette, QColor
-    palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor(255, 255, 255))
-    palette.setColor(QPalette.ColorRole.Base, QColor(25, 25, 25))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53))
-    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(255, 255, 255))
-    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(255, 255, 255))
-    palette.setColor(QPalette.ColorRole.Text, QColor(255, 255, 255))
-    palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
-    palette.setColor(QPalette.ColorRole.ButtonText, QColor(255, 255, 255))
-    palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 0, 0))
-    palette.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
-    app.setPalette(palette)
+    apply_dark_theme(app)
     
     window = MainWindow()
     window.show()

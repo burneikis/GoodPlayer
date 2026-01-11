@@ -12,6 +12,7 @@ from src.audio_engine import AudioEngine
 
 
 class PlaybackClock:
+    DEFAULT_FPS = 30.0
     """
     Playback clock that uses audio time as master.
     When paused, maintains a manual time position.
@@ -20,7 +21,7 @@ class PlaybackClock:
     def __init__(self, audio_engine: AudioEngine, fps: float):
         self._audio_engine = audio_engine
         self._fps = fps
-        self._frame_duration = 1.0 / fps if fps > 0 else 1.0 / 30.0
+        self._frame_duration = 1.0 / fps if fps > 0 else 1.0 / self.DEFAULT_FPS
         
         # Manual time used when paused or frame-stepping
         self._manual_time: float = 0.0

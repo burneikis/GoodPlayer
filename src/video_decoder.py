@@ -93,6 +93,9 @@ class VideoDecoder:
     CACHE_MEMORY_BUDGET = 800 * 1024 * 1024
     PREFETCH_AHEAD = 90  # Frames to prefetch ahead (1.5s at 60fps)
     PREFETCH_BEHIND = 10  # Frames to keep behind
+    DEFAULT_CACHE_SIZE = 120
+    MIN_CACHE_SIZE = 60
+    DEFAULT_FPS = 30.0
     
     def __init__(self, filepath: str, cache_seconds: float = 3.0):
         self.filepath = filepath
@@ -187,9 +190,9 @@ class VideoDecoder:
         if frame_size_bytes > 0:
             max_frames_by_memory = self.CACHE_MEMORY_BUDGET // frame_size_bytes
             cache_by_time = int(self._cache_seconds * 2 * self.fps)
-            cache_size = min(max_frames_by_memory, max(cache_by_time, 60))
+            cache_size = min(max_frames_by_memory, max(cache_by_time, self.MIN_CACHE_SIZE))
         else:
-            cache_size = 120
+            cache_size = self.DEFAULT_CACHE_SIZE
         
         self._cache = LRUCache(max_size=cache_size)
         logger.info(f"Cache size: {cache_size} frames ({self.width}x{self.height})")
