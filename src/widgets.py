@@ -229,7 +229,7 @@ class WelcomeOverlay(QLabel):
         super().__init__(parent)
         self._click_callback: Optional[Callable] = None
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setText("Click or drop a video here\nor press Ctrl/Cmd+O to Open")
+        self.setText("Click here or press\nCtrl/Cmd+O to Open")
         self.setStyleSheet("""
             QLabel {
                 background-color: rgba(0, 0, 0, 200);
