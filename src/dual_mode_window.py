@@ -1,7 +1,7 @@
 """
 Dual-Mode Main Window
-Supports both native playback (Qt Multimedia) for smooth viewing
-and frame-accurate mode (PyAV) for precise control.
+Supports both native playback (PyAV timer-based) for smooth viewing
+and frame-accurate mode (PyAV frame-by-frame) for precise control.
 """
 
 import sys
@@ -10,7 +10,7 @@ from enum import Enum, auto
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QFileDialog, QSizePolicy, QStackedWidget
+    QLabel, QFileDialog, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QTimer, QElapsedTimer
 from PyQt6.QtGui import QKeyEvent
@@ -26,13 +26,13 @@ from .theme import apply_dark_theme
 
 logger = logging.getLogger(__name__)
 
-# Check for Qt Multimedia availability
+# Check for PyAV native player availability (replaces Qt Multimedia)
 try:
-    from src.qt_native_player import QtNativePlayer, is_available as qt_native_available
-    QT_NATIVE_AVAILABLE = qt_native_available()
+    from src.pyav_native_player import PyAVNativePlayer, is_available as pyav_native_available
+    PYAV_NATIVE_AVAILABLE = pyav_native_available()
 except ImportError:
-    QT_NATIVE_AVAILABLE = False
-    QtNativePlayer = None
+    PYAV_NATIVE_AVAILABLE = False
+    PyAVNativePlayer = None
 
 
 class PlaybackMode(Enum):
@@ -64,7 +64,7 @@ class DualModeMainWindow(QMainWindow):
 
         # Current mode
         self._mode = PlaybackMode.FRAME_ACCURATE
-        self._prefer_native = QT_NATIVE_AVAILABLE
+        self._prefer_native = PYAV_NATIVE_AVAILABLE
 
         # State
         self._last_displayed_frame = -1
@@ -82,7 +82,7 @@ class DualModeMainWindow(QMainWindow):
         self._setup_ui()
         self._setup_timers()
 
-        logger.info(f"DualModeMainWindow: Native player {'available' if QT_NATIVE_AVAILABLE else 'not available'}")
+        logger.info(f"DualModeMainWindow: Native player {'available' if PYAV_NATIVE_AVAILABLE else 'not available'}")
 
     def focusOutEvent(self, event):
         # Hide overlays when window loses focus
@@ -120,18 +120,9 @@ class DualModeMainWindow(QMainWindow):
         video_layout = QVBoxLayout(self._video_container)
         video_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Stacked widget to switch between native and frame-accurate display
-        self._video_stack = QStackedWidget()
-        video_layout.addWidget(self._video_stack)
-        
-        # Frame-accurate video widget (index 0) - reuse VideoWidget from widgets module
+        # Single video widget shared by both native and frame-accurate modes
         self._frame_video_widget = VideoWidget()
-        self._video_stack.addWidget(self._frame_video_widget)
-        
-        # Native video widget placeholder (index 1) - created when needed
-        self._native_widget_placeholder = QWidget()
-        self._native_widget_placeholder.setStyleSheet("background-color: black;")
-        self._video_stack.addWidget(self._native_widget_placeholder)
+        video_layout.addWidget(self._frame_video_widget)
         
         content_layout.addWidget(self._video_container, stretch=1)
 
@@ -196,25 +187,22 @@ class DualModeMainWindow(QMainWindow):
     
     def _init_native_player(self) -> bool:
         """Initialize native player if available."""
-        if not QT_NATIVE_AVAILABLE:
+        if not PYAV_NATIVE_AVAILABLE:
             return False
         
         if self._native_player is not None:
             return True
         
         try:
-            # Create native player in VIDEO-ONLY mode (audio handled by AudioEngine)
-            self._native_player = QtNativePlayer(self._video_container, video_only=True)
-            
-            # Replace placeholder with native video widget
-            self._video_stack.removeWidget(self._native_widget_placeholder)
-            self._video_stack.insertWidget(1, self._native_player.video_widget)
+            # Create PyAV native player using frame-accurate widget for display
+            # This shares the same VideoWidget for seamless mode switching
+            self._native_player = PyAVNativePlayer(self._frame_video_widget)
             
             # Connect signals
             self._native_player.time_changed.connect(self._on_native_time_changed)
             self._native_player.playback_ended.connect(self._on_native_playback_ended)
             
-            logger.info("Native player initialized (video-only, audio via AudioEngine)")
+            logger.info("PyAV native player initialized (video via PyAV, audio via AudioEngine)")
             return True
             
         except Exception as e:
@@ -223,7 +211,7 @@ class DualModeMainWindow(QMainWindow):
             return False
     
     def _switch_to_native_mode(self) -> bool:
-        """Switch to native playback mode (video via Qt, audio via AudioEngine)."""
+        """Switch to native playback mode (video via PyAV, audio via AudioEngine)."""
         if not self._prefer_native or not self._init_native_player():
             return False
         
@@ -235,13 +223,13 @@ class DualModeMainWindow(QMainWindow):
         if self._frame_controller:
             current_time = self._frame_controller.current_time
         
-        # Sync native player (video only)
+        # Sync native player position
         if self._native_player:
             self._native_player.seek(current_time)
-            self._video_stack.setCurrentIndex(1)  # Show native widget
+            # No need to switch widgets - PyAV native player uses the same VideoWidget
         
         self._mode = PlaybackMode.NATIVE
-        logger.debug("Switched to NATIVE mode (video-only)")
+        logger.debug("Switched to NATIVE mode (PyAV)")
         return True
     
     def _switch_to_frame_accurate_mode(self) -> None:
@@ -264,13 +252,12 @@ class DualModeMainWindow(QMainWindow):
         # Sync position and display frame
         if self._frame_controller:
             self._frame_controller.seek(current_time)
-            # Display the frame BEFORE switching widgets to avoid black flash
+            # Display the frame using frame-accurate decoder
             self._display_current_frame()
             # Force the widget to repaint immediately
             self._frame_video_widget.repaint()
         
-        # Now switch to show the frame-accurate widget (which already has the frame)
-        self._video_stack.setCurrentIndex(0)
+        # No need to switch widgets - both modes use the same VideoWidget
         self._mode = PlaybackMode.FRAME_ACCURATE
         logger.debug("Switched to FRAME_ACCURATE mode")
     
@@ -359,7 +346,6 @@ class DualModeMainWindow(QMainWindow):
 
             # Start in frame-accurate mode, display first frame
             self._mode = PlaybackMode.FRAME_ACCURATE
-            self._video_stack.setCurrentIndex(0)
             self._display_current_frame()
             self._update_time_display()
             self._update_overlay_geometry()  # Ensure overlays are properly positioned
