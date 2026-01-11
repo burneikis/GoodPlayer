@@ -6,11 +6,9 @@ Provides consistent dark theme across all windows.
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QPalette, QColor
 
-
 def apply_dark_theme(app: QApplication) -> None:
     """Apply dark theme to the application."""
     app.setStyle("Fusion")
-    
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
     palette.setColor(QPalette.ColorRole.WindowText, QColor(255, 255, 255))
@@ -25,4 +23,4 @@ def apply_dark_theme(app: QApplication) -> None:
     palette.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))
     palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
-    app.setPalette(palette)
+    app.setPalette(palette)# ...existing code from theme.py will be moved here...

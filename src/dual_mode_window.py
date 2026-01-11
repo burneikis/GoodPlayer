@@ -18,11 +18,11 @@ from PyQt6.QtGui import QKeyEvent
 # Use absolute imports for local modules
 from src.playback_controller import PlaybackController
 from src.video_decoder import VideoDecoder
-from widgets import (
+from .widgets import (
     AudioMixerPanel, NotificationOverlay, WelcomeOverlay,
     ClickableSlider, VideoWidget, TimeInfoOverlay, format_time
 )
-from theme import apply_dark_theme
+from .theme import apply_dark_theme
 
 logger = logging.getLogger(__name__)
 

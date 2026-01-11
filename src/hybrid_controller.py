@@ -10,14 +10,14 @@ from typing import Optional, Callable
 from enum import Enum, auto
 import numpy as np
 
-from src.video_decoder import VideoDecoder
-from src.audio_engine import AudioEngine
+from video_decoder import VideoDecoder
+from audio_engine import AudioEngine
 
 logger = logging.getLogger(__name__)
 
 # Check for native player availability
 try:
-    from src.native_player import NativePlayer, is_available as native_available
+    from .native_player import NativePlayer, is_available as native_available
     NATIVE_PLAYER_AVAILABLE = native_available()
 except ImportError:
     NATIVE_PLAYER_AVAILABLE = False

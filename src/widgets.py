@@ -410,4 +410,4 @@ def format_time(seconds: float) -> str:
     """Format seconds as MM:SS.mmm"""
     mins = int(seconds) // 60
     secs = seconds % 60
-    return f"{mins:02d}:{secs:06.3f}"
+    return f"{mins:02d}:{secs:06.3f}"# ...existing code from widgets.py will be moved here...
