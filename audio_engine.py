@@ -383,10 +383,15 @@ class AudioEngine:
         any_data = False
         
         for track in self._tracks:
+            # Always read from buffer to keep track in sync, even when muted
+            data = track.buffer.read(frames)
+            
             if track.muted:
+                # Discard data but mark that we had data available
+                if len(data) > 0:
+                    any_data = True
                 continue
             
-            data = track.buffer.read(frames)
             if len(data) > 0:
                 any_data = True
                 if len(data) < frames:
