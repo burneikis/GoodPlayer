@@ -31,13 +31,13 @@ def main():
     
     if use_dual_mode:
         try:
-            from dual_mode_window import main as app_main
+            from src.dual_mode_window import main as app_main
             print("Starting in dual-mode (Native + Frame-Accurate)")
         except ImportError as e:
             print(f"Dual mode unavailable ({e}), falling back to legacy mode")
-            from main_window import main as app_main
+            from src.main_window import main as app_main
     else:
-        from main_window import main as app_main
+        from src.main_window import main as app_main
         print("Starting in legacy mode (Frame-Accurate only)")
     
     app_main()

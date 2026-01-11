@@ -18,14 +18,14 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QElapsedTimer
 from PyQt6.QtGui import QImage, QPixmap, QKeyEvent
 
-from playback_controller import PlaybackController
-from video_decoder import VideoDecoder
+from src.playback_controller import PlaybackController
+from src.video_decoder import VideoDecoder
 
 logger = logging.getLogger(__name__)
 
 # Check for Qt Multimedia availability
 try:
-    from qt_native_player import QtNativePlayer, is_available as qt_native_available
+    from src.qt_native_player import QtNativePlayer, is_available as qt_native_available
     QT_NATIVE_AVAILABLE = qt_native_available()
 except ImportError:
     QT_NATIVE_AVAILABLE = False

@@ -10,7 +10,6 @@ import sounddevice as sd
 import threading
 from typing import Optional
 
-# Setup logging
 logger = logging.getLogger(__name__)
 
 

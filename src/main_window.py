@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QElapsedTimer
 from PyQt6.QtGui import QImage, QPixmap, QKeyEvent
 
-from playback_controller import PlaybackController
+from src.playback_controller import PlaybackController
 
 logger = logging.getLogger(__name__)
 

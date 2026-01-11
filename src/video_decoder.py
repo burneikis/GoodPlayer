@@ -12,7 +12,6 @@ from fractions import Fraction
 from typing import Optional
 import numpy as np
 
-# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
