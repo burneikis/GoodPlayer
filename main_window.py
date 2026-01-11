@@ -30,6 +30,16 @@ class MainWindow(QMainWindow):
     DEFAULT_REFRESH_INTERVAL_MS = 16  # Fallback for ~60fps
     STATS_INTERVAL_MS = 5000  # Log stats every 5 seconds
     REFRESH_HEADROOM_FACTOR = 0.85  # Target 85% of frame time for headroom
+    # Key skip times (in seconds)
+    SKIP_BACKWARD_SMALL = -5
+    SKIP_FORWARD_SMALL = 10
+    SKIP_BACKWARD_LARGE = -15
+    SKIP_FORWARD_LARGE = 30
+
+    # Notification durations (in ms)
+    NOTIFY_SHORT = 500
+    NOTIFY_MEDIUM = 600
+    NOTIFY_DEFAULT = 800
     
     def __init__(self):
         super().__init__()
@@ -216,13 +226,13 @@ class MainWindow(QMainWindow):
             return
         # Don't step past the last frame
         if self._controller.current_frame >= self._controller.total_frames - 1:
-            self._show_notification("End", 500)
+            self._show_notification("End", self.NOTIFY_SHORT)
             return
 
         self._controller.step_forward()
         self._display_current_frame()
         self._update_time_display()
-        self._show_notification("Step +1", 500)
+        self._show_notification("Step +1", self.NOTIFY_SHORT)
 
     def _step_backward(self) -> None:
         """Step backward one frame."""
@@ -230,13 +240,13 @@ class MainWindow(QMainWindow):
             return
         # Don't step before the first frame
         if self._controller.current_frame <= 0:
-            self._show_notification("Start", 500)
+            self._show_notification("Start", self.NOTIFY_SHORT)
             return
 
         self._controller.step_backward()
         self._display_current_frame()
         self._update_time_display()
-        self._show_notification("Step -1", 500)
+        self._show_notification("Step -1", self.NOTIFY_SHORT)
     
     def _display_current_frame(self) -> None:
         """Display the current frame."""
@@ -363,7 +373,7 @@ class MainWindow(QMainWindow):
         # Apply to all audio tracks
         for i in range(self._controller.num_audio_tracks):
             self._controller.set_track_volume(i, self._master_volume)
-        self._show_notification(f"Volume: {int(self._master_volume * 100)}%", 600)
+        self._show_notification(f"Volume: {int(self._master_volume * 100)}%", self.NOTIFY_MEDIUM)
 
     def _skip_time(self, seconds: float) -> None:
         """Skip forward or backward by the given number of seconds."""
@@ -376,7 +386,7 @@ class MainWindow(QMainWindow):
         self._display_current_frame()
         self._update_time_display()
         sign = "+" if seconds > 0 else ""
-        self._show_notification(f"Skip {sign}{int(seconds)}s", 600)
+        self._show_notification(f"Skip {sign}{int(seconds)}s", self.NOTIFY_MEDIUM)
 
     def _on_track_volume_changed(self, track_index: int, volume: float) -> None:
         """Handle track volume change from mixer UI."""
@@ -413,13 +423,13 @@ class MainWindow(QMainWindow):
         elif key == Qt.Key.Key_Down:
             self._change_volume(-0.05)
         elif key == Qt.Key.Key_BracketLeft:
-            self._skip_time(-5)  # [ = 5s back
+            self._skip_time(self.SKIP_BACKWARD_SMALL)  # [ = 5s back
         elif key == Qt.Key.Key_BracketRight:
-            self._skip_time(10)  # ] = 10s forward
+            self._skip_time(self.SKIP_FORWARD_SMALL)  # ] = 10s forward
         elif key == Qt.Key.Key_BraceLeft:
-            self._skip_time(-15)  # { = 15s back
+            self._skip_time(self.SKIP_BACKWARD_LARGE)  # { = 15s back
         elif key == Qt.Key.Key_BraceRight:
-            self._skip_time(30)  # } = 30s forward
+            self._skip_time(self.SKIP_FORWARD_LARGE)  # } = 30s forward
         elif key == Qt.Key.Key_A:
             self._toggle_audio_mixer()
         else:
@@ -429,10 +439,10 @@ class MainWindow(QMainWindow):
         """Toggle audio mixer panel visibility."""
         if self._audio_mixer.isVisible():
             self._audio_mixer.hide()
-            self._show_notification("Mixer: Off", 600)
+            self._show_notification("Mixer: Off", self.NOTIFY_MEDIUM)
         else:
             self._audio_mixer.show()
-            self._show_notification("Mixer: On", 600)
+            self._show_notification("Mixer: On", self.NOTIFY_MEDIUM)
     
     def resizeEvent(self, event) -> None:
         """Handle window resize - reposition info label overlays."""

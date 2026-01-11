@@ -152,6 +152,8 @@ class AudioMixerPanel(QFrame):
 
 
 class NotificationOverlay(QLabel):
+    DEFAULT_DURATION_MS = 1000
+    NOTIFICATION_MARGIN = 10
     """Overlay widget for showing action notifications."""
 
     def __init__(self, parent=None, use_top_level: bool = False):
@@ -192,7 +194,7 @@ class NotificationOverlay(QLabel):
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.hide)
 
-    def show_notification(self, text: str, duration_ms: int = 1000) -> None:
+    def show_notification(self, text: str, duration_ms: int = None) -> None:
         """Show a notification that fades after duration."""
         self.setText(text)
         self.adjustSize()
@@ -201,22 +203,22 @@ class NotificationOverlay(QLabel):
             # Position relative to parent widget's global position
             parent_global = self._parent_widget.mapToGlobal(self._parent_widget.rect().topLeft())
             parent_rect = self._parent_widget.rect()
-            margin = 10
-            x = parent_global.x() + parent_rect.width() - self.width() - margin
-            y = parent_global.y() + margin
+            x = parent_global.x() + parent_rect.width() - self.width() - self.NOTIFICATION_MARGIN
+            y = parent_global.y() + self.NOTIFICATION_MARGIN
             self.move(x, y)
         elif self.parent():
             # Position in top right of parent
             parent_rect = self.parent().rect()
-            margin = 10
             self.move(
-                parent_rect.width() - self.width() - margin,
-                margin
+                parent_rect.width() - self.width() - self.NOTIFICATION_MARGIN,
+                self.NOTIFICATION_MARGIN
             )
         
         self.show()
         if not self._use_top_level:
             self.raise_()
+        if duration_ms is None:
+            duration_ms = self.DEFAULT_DURATION_MS
         self._timer.start(duration_ms)
 
 

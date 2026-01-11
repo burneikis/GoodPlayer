@@ -103,7 +103,7 @@ class AudioTrack:
         self.target_channels = target_channels
         
         # Get source stream properties
-        self.source_sample_rate = stream.codec_context.sample_rate or 48000
+        self.source_sample_rate = stream.codec_context.sample_rate or AudioEngine.TARGET_SAMPLE_RATE
         self.source_layout = stream.codec_context.layout.name if stream.codec_context.layout else 'stereo'
         self.source_channels = stream.codec_context.channels or 2
         
@@ -117,8 +117,8 @@ class AudioTrack:
             rate=target_sample_rate
         )
         
-        self.buffer = RingBuffer(5.0, target_sample_rate, target_channels)
-        self.volume = 1.0
+        self.buffer = RingBuffer(AudioEngine.DEFAULT_BUFFER_SECONDS, target_sample_rate, target_channels)
+        self.volume = AudioEngine.DEFAULT_VOLUME
         self.muted = False
     
     def decode_frame(self, frame: av.AudioFrame) -> None:
@@ -168,6 +168,8 @@ class AudioEngine:
     TARGET_SAMPLE_RATE = 48000
     TARGET_CHANNELS = 2
     BUFFER_SIZE = 1024
+    DEFAULT_BUFFER_SECONDS = 5.0
+    DEFAULT_VOLUME = 1.0
     
     def __init__(self, filepath: str, max_tracks: int = 3):
         self.filepath = filepath
