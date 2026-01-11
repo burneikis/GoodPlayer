@@ -447,7 +447,7 @@ class AudioEngine:
         
         logger.debug(f"Audio playback paused at {self._paused_time:.3f}s")
     
-    def seek(self, time_seconds: float) -> None:
+    def seek(self, time_seconds: float, blocking: bool = True) -> None:
         time_seconds = max(0.0, time_seconds)
         
         was_playing = self._playing
@@ -465,10 +465,16 @@ class AudioEngine:
             self._seek_requested = time_seconds
         self._paused_time = time_seconds
         
-        if not self._seek_complete.wait(timeout=3.0):
-            logger.warning("Seek timeout - forcing completion")
-            with self._seek_lock:
-                self._seek_requested = None
+        # Wait for seek to complete (or timeout)
+        if blocking:
+            if not self._seek_complete.wait(timeout=0.5):
+                logger.warning("Seek timeout - forcing completion")
+                with self._seek_lock:
+                    self._seek_requested = None
+                with self._samples_lock:
+                    self._samples_played = int(time_seconds * self.TARGET_SAMPLE_RATE)
+        else:
+            # Non-blocking: just set the samples_played and let the decoder catch up
             with self._samples_lock:
                 self._samples_played = int(time_seconds * self.TARGET_SAMPLE_RATE)
         

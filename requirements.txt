@@ -1,5 +1,6 @@
 # Core dependencies
 PyQt6>=6.4.0
+# Note: PyQt6 includes QtMultimedia for native video playback
 numpy>=1.24.0
 sounddevice>=0.4.6
 av>=10.0.0

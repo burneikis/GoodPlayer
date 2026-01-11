@@ -294,8 +294,9 @@ class VideoWidget(QLabel):
 class MainWindow(QMainWindow):
     """Main application window with performance monitoring."""
     
-    REFRESH_INTERVAL_MS = 16
+    DEFAULT_REFRESH_INTERVAL_MS = 16  # Fallback for ~60fps
     STATS_INTERVAL_MS = 5000  # Log stats every 5 seconds
+    REFRESH_HEADROOM_FACTOR = 0.85  # Target 85% of frame time for headroom
     
     def __init__(self):
         super().__init__()
@@ -383,7 +384,7 @@ class MainWindow(QMainWindow):
     def _setup_timers(self) -> None:
         """Setup refresh and stats timers."""
         self._refresh_timer = QTimer()
-        self._refresh_timer.setInterval(self.REFRESH_INTERVAL_MS)
+        self._refresh_timer.setInterval(self.DEFAULT_REFRESH_INTERVAL_MS)
         self._refresh_timer.timeout.connect(self._refresh_display)
         
         self._stats_timer = QTimer()
@@ -435,6 +436,18 @@ class MainWindow(QMainWindow):
                 self._on_track_volume_changed,
                 self._on_track_mute_changed
             )
+
+            # Calculate optimal refresh interval based on video FPS
+            video_fps = self._controller.fps
+            if video_fps > 0:
+                # Calculate interval with headroom for processing
+                frame_time_ms = 1000.0 / video_fps
+                refresh_interval = max(1, int(frame_time_ms * self.REFRESH_HEADROOM_FACTOR))
+            else:
+                refresh_interval = self.DEFAULT_REFRESH_INTERVAL_MS
+            
+            self._refresh_timer.setInterval(refresh_interval)
+            logger.info(f"Video FPS: {video_fps:.2f}, refresh interval: {refresh_interval}ms")
 
             # Display first frame
             self._display_current_frame()
