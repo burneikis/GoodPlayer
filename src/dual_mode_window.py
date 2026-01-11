@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QFileDialog, QSizePolicy, QStackedWidget
 )
-from PyQt6.QtCore import Qt, QTimer, QElapsedTimer
+from PyQt6.QtCore import Qt, QTimer, QElapsedTimer, QSettings
 from PyQt6.QtGui import QKeyEvent
 
 # Use absolute imports for local modules
@@ -54,6 +54,12 @@ class DualModeMainWindow(QMainWindow):
     STATS_INTERVAL_MS = 5000
     REFRESH_HEADROOM_FACTOR = 0.85
     MIN_STEP_INTERVAL_MS = 30  # Minimum time between step operations
+    
+    # Settings keys
+    SETTINGS_ORG = "GoodPlayer"
+    SETTINGS_APP = "GoodPlayer"
+    SETTINGS_GEOMETRY = "window/geometry"
+    SETTINGS_STATE = "window/state"
 
     def __init__(self):
         super().__init__()
@@ -81,6 +87,7 @@ class DualModeMainWindow(QMainWindow):
 
         self._setup_ui()
         self._setup_timers()
+        self._restore_window_geometry()
 
         logger.info(f"DualModeMainWindow: Native player {'available' if QT_NATIVE_AVAILABLE else 'not available'}")
 
@@ -768,7 +775,24 @@ class DualModeMainWindow(QMainWindow):
         if self._welcome_overlay.isVisible():
             self._welcome_overlay.update_position()
 
+    def _save_window_geometry(self) -> None:
+        """Save window geometry and state to settings."""
+        settings = QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)
+        settings.setValue(self.SETTINGS_GEOMETRY, self.saveGeometry())
+        settings.setValue(self.SETTINGS_STATE, self.saveState())
+    
+    def _restore_window_geometry(self) -> None:
+        """Restore window geometry and state from settings."""
+        settings = QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)
+        geometry = settings.value(self.SETTINGS_GEOMETRY)
+        state = settings.value(self.SETTINGS_STATE)
+        if geometry:
+            self.restoreGeometry(geometry)
+        if state:
+            self.restoreState(state)
+
     def closeEvent(self, event) -> None:
+        self._save_window_geometry()
         self._refresh_timer.stop()
         self._stats_timer.stop()
         # Hide top-level overlay windows

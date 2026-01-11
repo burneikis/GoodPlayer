@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QFileDialog
 )
-from PyQt6.QtCore import Qt, QTimer, QElapsedTimer
+from PyQt6.QtCore import Qt, QTimer, QElapsedTimer, QSettings
 from PyQt6.QtGui import QKeyEvent
 
 # Use absolute imports for local modules
@@ -41,6 +41,12 @@ class MainWindow(QMainWindow):
     NOTIFY_MEDIUM = 600
     NOTIFY_DEFAULT = 800
     
+    # Settings keys
+    SETTINGS_ORG = "GoodPlayer"
+    SETTINGS_APP = "GoodPlayer"
+    SETTINGS_GEOMETRY = "window/geometry"
+    SETTINGS_STATE = "window/state"
+    
     def __init__(self):
         super().__init__()
         
@@ -55,6 +61,7 @@ class MainWindow(QMainWindow):
         
         self._setup_ui()
         self._setup_timers()
+        self._restore_window_geometry()
     
     def _setup_ui(self) -> None:
         """Initialize the user interface."""
@@ -468,8 +475,25 @@ class MainWindow(QMainWindow):
             video_rect.height() - self._frame_label.height() - margin
         )
 
+    def _save_window_geometry(self) -> None:
+        """Save window geometry and state to settings."""
+        settings = QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)
+        settings.setValue(self.SETTINGS_GEOMETRY, self.saveGeometry())
+        settings.setValue(self.SETTINGS_STATE, self.saveState())
+    
+    def _restore_window_geometry(self) -> None:
+        """Restore window geometry and state from settings."""
+        settings = QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)
+        geometry = settings.value(self.SETTINGS_GEOMETRY)
+        state = settings.value(self.SETTINGS_STATE)
+        if geometry:
+            self.restoreGeometry(geometry)
+        if state:
+            self.restoreState(state)
+
     def closeEvent(self, event) -> None:
         """Handle window close."""
+        self._save_window_geometry()
         self._refresh_timer.stop()
         self._stats_timer.stop()
         if self._controller:
