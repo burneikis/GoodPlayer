@@ -41,41 +41,6 @@ class PlaybackMode(Enum):
     FRAME_ACCURATE = auto()  # PyAV for frame-by-frame control
 
 
-class ModeIndicator(QLabel):
-    """Small indicator showing current playback mode."""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setStyleSheet("""
-            background-color: rgba(0, 0, 0, 150);
-            color: white;
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 3px;
-        """)
-        self.hide()
-    
-    def set_mode(self, mode: PlaybackMode) -> None:
-        if mode == PlaybackMode.NATIVE:
-            self.setText("🎬 Native")
-            self.setStyleSheet("""
-                background-color: rgba(0, 128, 0, 180);
-                color: white;
-                font-size: 10px;
-                padding: 2px 6px;
-                border-radius: 3px;
-            """)
-        else:
-            self.setText("🎯 Frame")
-            self.setStyleSheet("""
-                background-color: rgba(0, 100, 200, 180);
-                color: white;
-                font-size: 10px;
-                padding: 2px 6px;
-                border-radius: 3px;
-            """)
-        self.adjustSize()
-        self.show()
 
 
 class DualModeMainWindow(QMainWindow):
@@ -95,7 +60,7 @@ class DualModeMainWindow(QMainWindow):
         
         # Controllers
         self._frame_controller: Optional[PlaybackController] = None
-        self._native_player: Optional[QtNativePlayer] = None
+        self._native_player = None  # type: ignore
         
         # Current mode
         self._mode = PlaybackMode.FRAME_ACCURATE
@@ -178,7 +143,6 @@ class DualModeMainWindow(QMainWindow):
         self._notification = NotificationOverlay(self._video_container, use_top_level=True)
         
         # Mode indicator
-        self._mode_indicator = ModeIndicator(self._overlay_container)
 
         # Time info overlay (top-level window to render over QVideoWidget)
         self._time_label = TimeInfoOverlay(self._video_container, align_right=False)
@@ -263,7 +227,6 @@ class DualModeMainWindow(QMainWindow):
             self._video_stack.setCurrentIndex(1)  # Show native widget
         
         self._mode = PlaybackMode.NATIVE
-        self._mode_indicator.set_mode(PlaybackMode.NATIVE)
         logger.debug("Switched to NATIVE mode (video-only)")
         return True
     
@@ -295,7 +258,6 @@ class DualModeMainWindow(QMainWindow):
         # Now switch to show the frame-accurate widget (which already has the frame)
         self._video_stack.setCurrentIndex(0)
         self._mode = PlaybackMode.FRAME_ACCURATE
-        self._mode_indicator.set_mode(PlaybackMode.FRAME_ACCURATE)
         logger.debug("Switched to FRAME_ACCURATE mode")
     
     def _on_native_time_changed(self, time_pos: float) -> None:
@@ -357,7 +319,6 @@ class DualModeMainWindow(QMainWindow):
             self._welcome_overlay.hide()
             self._time_label.show_overlay()
             self._frame_label.show_overlay()
-            self._mode_indicator.show()
             
             # Enable timeline
             self._timeline_slider.setEnabled(True)
@@ -384,7 +345,6 @@ class DualModeMainWindow(QMainWindow):
 
             # Start in frame-accurate mode, display first frame
             self._mode = PlaybackMode.FRAME_ACCURATE
-            self._mode_indicator.set_mode(PlaybackMode.FRAME_ACCURATE)
             self._video_stack.setCurrentIndex(0)
             self._display_current_frame()
             self._update_time_display()
@@ -789,7 +749,6 @@ class DualModeMainWindow(QMainWindow):
             self._frame_label.update_position()
         
         # Mode indicator in top-left
-        self._mode_indicator.move(margin, margin)
         
         # Welcome overlay centered
         if self._welcome_overlay.isVisible():
