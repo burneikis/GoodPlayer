@@ -217,6 +217,57 @@ class NotificationOverlay(QLabel):
         self._timer.start(duration_ms)
 
 
+class TimeInfoOverlay(QLabel):
+    """
+    Overlay widget for showing time/frame information.
+    Uses a frameless top-level window to render over video hardware overlays.
+    """
+
+    def __init__(self, parent=None, align_right: bool = False):
+        # Create as top-level frameless window to render over QVideoWidget
+        super().__init__(None)  # No parent - top level window
+        self._parent_widget = parent
+        self._align_right = align_right
+        self._margin = 10
+        
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.Tool |  # Don't show in taskbar
+            Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        
+        self.setStyleSheet("color: white; font-family: monospace; background: transparent;")
+        self.hide()
+
+    def update_position(self) -> None:
+        """Update position relative to parent widget."""
+        if not self._parent_widget:
+            return
+        
+        self.adjustSize()
+        parent_global = self._parent_widget.mapToGlobal(self._parent_widget.rect().topLeft())
+        parent_rect = self._parent_widget.rect()
+        
+        if self._align_right:
+            x = parent_global.x() + parent_rect.width() - self.width() - self._margin
+        else:
+            x = parent_global.x() + self._margin
+        y = parent_global.y() + parent_rect.height() - self.height() - self._margin
+        
+        self.move(x, y)
+
+    def show_overlay(self) -> None:
+        """Show the overlay and update position."""
+        self.update_position()
+        self.show()
+
+    def hide_overlay(self) -> None:
+        """Hide the overlay."""
+        self.hide()
+
+
 class WelcomeOverlay(QLabel):
     """Overlay widget prompting user to open a file."""
 
@@ -478,17 +529,13 @@ class DualModeMainWindow(QMainWindow):
         # Mode indicator
         self._mode_indicator = ModeIndicator(self._overlay_container)
 
-        # Time info overlay
-        self._time_label = QLabel("00:00.000 / 00:00.000", self._overlay_container)
-        self._time_label.setStyleSheet("color: white; font-family: monospace; background: transparent;")
-        self._time_label.adjustSize()
-        self._time_label.hide()
+        # Time info overlay (top-level window to render over QVideoWidget)
+        self._time_label = TimeInfoOverlay(self._video_container, align_right=False)
+        self._time_label.setText("00:00.000 / 00:00.000")
 
-        # Frame info overlay
-        self._frame_label = QLabel("Frame: 0 / 0", self._overlay_container)
-        self._frame_label.setStyleSheet("color: white; font-family: monospace; background: transparent;")
-        self._frame_label.adjustSize()
-        self._frame_label.hide()
+        # Frame info overlay (top-level window to render over QVideoWidget)
+        self._frame_label = TimeInfoOverlay(self._video_container, align_right=True)
+        self._frame_label.setText("Frame: 0 / 0")
 
         # Controls panel
         controls_panel = QWidget()
@@ -657,8 +704,8 @@ class DualModeMainWindow(QMainWindow):
             
             # Hide welcome overlay, show info labels
             self._welcome_overlay.hide()
-            self._time_label.show()
-            self._frame_label.show()
+            self._time_label.show_overlay()
+            self._frame_label.show_overlay()
             self._mode_indicator.show()
             
             # Enable timeline
@@ -1072,6 +1119,10 @@ class DualModeMainWindow(QMainWindow):
         super().resizeEvent(event)
         self._update_overlay_geometry()
     
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        self._update_overlay_geometry()
+    
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._update_overlay_geometry()
@@ -1085,14 +1136,11 @@ class DualModeMainWindow(QMainWindow):
         
         margin = 10
 
-        self._time_label.adjustSize()
-        self._time_label.move(margin, container_rect.height() - self._time_label.height() - margin)
-
-        self._frame_label.adjustSize()
-        self._frame_label.move(
-            container_rect.width() - self._frame_label.width() - margin,
-            container_rect.height() - self._frame_label.height() - margin
-        )
+        # Update time info overlays (top-level windows)
+        if self._time_label.isVisible():
+            self._time_label.update_position()
+        if self._frame_label.isVisible():
+            self._frame_label.update_position()
         
         # Mode indicator in top-left
         self._mode_indicator.move(margin, margin)
@@ -1104,6 +1152,10 @@ class DualModeMainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         self._refresh_timer.stop()
         self._stats_timer.stop()
+        # Hide top-level overlay windows
+        self._time_label.hide()
+        self._frame_label.hide()
+        self._notification.hide()
         if self._frame_controller:
             self._log_stats()
             self._frame_controller.close()
