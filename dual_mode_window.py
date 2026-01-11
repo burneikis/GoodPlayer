@@ -49,41 +49,55 @@ class DualModeMainWindow(QMainWindow):
     - Native mode: Hardware-accelerated playback via Qt Multimedia
     - Frame-accurate mode: PyAV-based frame-by-frame control
     """
-    
+
     DEFAULT_REFRESH_INTERVAL_MS = 16
     STATS_INTERVAL_MS = 5000
     REFRESH_HEADROOM_FACTOR = 0.85
     MIN_STEP_INTERVAL_MS = 30  # Minimum time between step operations
-    
+
     def __init__(self):
         super().__init__()
-        
+
         # Controllers
-        self._frame_controller: Optional[PlaybackController] = None
+        self._frame_controller = None
         self._native_player = None  # type: ignore
-        
+
         # Current mode
         self._mode = PlaybackMode.FRAME_ACCURATE
         self._prefer_native = QT_NATIVE_AVAILABLE
-        
+
         # State
-        self._last_displayed_frame: int = -1
-        self._master_volume: float = 1.0
-        self._was_playing_before_seek: bool = False
-        self._playing: bool = False  # Explicit playing state to avoid race conditions
-        self._last_step_time: int = 0  # Timestamp of last step operation (ms)
+        self._last_displayed_frame = -1
+        self._master_volume = 1.0
+        self._was_playing_before_seek = False
+        self._playing = False  # Explicit playing state to avoid race conditions
+        self._last_step_time = 0  # Timestamp of last step operation (ms)
 
         # Performance tracking
         self._frames_displayed = 0
         self._frames_dropped = 0
         self._frame_timer = QElapsedTimer()
         self._frame_timer.start()  # Start immediately for step throttling
-        
+
         self._setup_ui()
         self._setup_timers()
-        
+
         logger.info(f"DualModeMainWindow: Native player {'available' if QT_NATIVE_AVAILABLE else 'not available'}")
-    
+
+    def focusOutEvent(self, event):
+        # Hide overlays when window loses focus
+        self._time_label.hide_overlay()
+        self._frame_label.hide_overlay()
+        self._notification.hide()
+        super().focusOutEvent(event)
+
+    def focusInEvent(self, event):
+        # Show overlays when window regains focus
+        self._time_label.show_overlay()
+        self._frame_label.show_overlay()
+        # Do not show notification overlay unless it was already visible before losing focus
+        super().focusInEvent(event)
+
     def _setup_ui(self) -> None:
         self.setWindowTitle("GoodPlayer")
         self.setMinimumSize(800, 600)
