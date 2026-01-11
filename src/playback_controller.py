@@ -7,8 +7,8 @@ import threading
 from typing import Optional, Callable
 import numpy as np
 
-from video_decoder import VideoDecoder
-from audio_engine import AudioEngine
+from src.video_decoder import VideoDecoder
+from src.audio_engine import AudioEngine
 
 
 class PlaybackClock:

@@ -1,3 +1,4 @@
+
 """
 Stage 4 & 5: PyQt UI with Performance Monitoring
 Main window for video playback with keyboard controls (legacy mode).
@@ -5,7 +6,6 @@ Main window for video playback with keyboard controls (legacy mode).
 
 import sys
 import logging
-from typing import Optional
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -14,7 +14,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QElapsedTimer
 from PyQt6.QtGui import QKeyEvent
 
-from playback_controller import PlaybackController
+# Use absolute imports for local modules
+from src.playback_controller import PlaybackController
 from widgets import (
     AudioMixerPanel, NotificationOverlay, WelcomeOverlay,
     ClickableSlider, VideoWidget, format_time
@@ -22,7 +23,6 @@ from widgets import (
 from theme import apply_dark_theme
 
 logger = logging.getLogger(__name__)
-
 
 class MainWindow(QMainWindow):
     """Main application window with performance monitoring."""

@@ -6,7 +6,6 @@ and frame-accurate mode (PyAV) for precise control.
 
 import sys
 import logging
-from typing import Optional
 from enum import Enum, auto
 
 from PyQt6.QtWidgets import (
@@ -16,8 +15,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QElapsedTimer
 from PyQt6.QtGui import QKeyEvent
 
-from playback_controller import PlaybackController
-from video_decoder import VideoDecoder
+# Use absolute imports for local modules
+from src.playback_controller import PlaybackController
+from src.video_decoder import VideoDecoder
 from widgets import (
     AudioMixerPanel, NotificationOverlay, WelcomeOverlay,
     ClickableSlider, VideoWidget, TimeInfoOverlay, format_time
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Check for Qt Multimedia availability
 try:
-    from qt_native_player import QtNativePlayer, is_available as qt_native_available
+    from src.qt_native_player import QtNativePlayer, is_available as qt_native_available
     QT_NATIVE_AVAILABLE = qt_native_available()
 except ImportError:
     QT_NATIVE_AVAILABLE = False
