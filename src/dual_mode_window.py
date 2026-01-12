@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QLabel, QFileDialog, QSizePolicy, QStackedWidget
 )
 from PyQt6.QtCore import Qt, QTimer, QElapsedTimer, QSettings
-from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtGui import QKeyEvent, QIcon
 
 # Use absolute imports for local modules
 from src.playback_controller import PlaybackController
@@ -815,6 +815,18 @@ def main():
     
     app = QApplication(sys.argv)
     apply_dark_theme(app)
+    
+    # Set application icon
+    import os
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable
+        base_path = sys._MEIPASS
+    else:
+        # Running as script
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    icon_path = os.path.join(base_path, 'assets', 'goodplayer.ico')
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
     
     window = DualModeMainWindow()
     window.show()
