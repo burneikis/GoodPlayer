@@ -7,10 +7,10 @@ import numpy as np
 from typing import Optional, Callable
 
 from PyQt6.QtWidgets import (
-    QLabel, QSlider, QFrame, QVBoxLayout, QWidget,
+    QLabel, QSlider, QFrame, QVBoxLayout, QHBoxLayout, QWidget,
     QScrollArea, QCheckBox, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 
 
@@ -269,9 +269,17 @@ class WelcomeOverlay(QLabel):
 class ClickableSlider(QSlider):
     """A slider that responds to mouse clicks anywhere on the track and supports dragging."""
 
+    hover_position = pyqtSignal(float)  # Emits timestamp
+    hover_exit = pyqtSignal()
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._dragging = False
+        self._duration = 0.0
+        self.setMouseTracking(True)  # Enable hover events
+
+    def set_duration(self, duration: float):
+        self._duration = duration
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -288,6 +296,12 @@ class ClickableSlider(QSlider):
             self.sliderMoved.emit(self.value())
             event.accept()
         else:
+            # Emit hover position for thumbnails
+            if self.orientation() == Qt.Orientation.Horizontal and self._duration > 0:
+                ratio = event.position().x() / self.width()
+                ratio = max(0.0, min(1.0, ratio))
+                timestamp = ratio * self._duration
+                self.hover_position.emit(timestamp)
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -298,6 +312,11 @@ class ClickableSlider(QSlider):
             event.accept()
         else:
             super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event):
+        """Handle mouse leaving slider."""
+        self.hover_exit.emit()
+        super().leaveEvent(event)
 
     def isSliderDown(self) -> bool:
         """Override to use our custom dragging state."""
@@ -354,6 +373,91 @@ class VideoWidget(QLabel):
         """Clear the display."""
         self.clear()
         self.setStyleSheet("background-color: black;")
+
+
+class ThumbnailPreviewWidget(QLabel):
+    """Widget for displaying thumbnail preview on slider hover."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(320, 180)
+        self.setStyleSheet("background-color: black; border: 2px solid #555;")
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hide()
+
+    def set_thumbnail(self, frame: np.ndarray):
+        """Set thumbnail from numpy RGB array."""
+        if frame is None:
+            return
+
+        height, width, channels = frame.shape
+        bytes_per_line = channels * width
+
+        qimage = QImage(
+            frame.data, width, height, bytes_per_line,
+            QImage.Format.Format_RGB888
+        ).copy()
+
+        pixmap = QPixmap.fromImage(qimage).scaled(
+            320, 180,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation
+        )
+        self.setPixmap(pixmap)
+
+
+class ThumbnailRowWidget(QWidget):
+    """Widget for displaying timeline thumbnail row."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(120)
+        self.setStyleSheet(
+            "background-color: rgba(0, 0, 0, 200); "
+            "border-top: 1px solid #555;"
+        )
+
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(5, 5, 5, 5)
+        self._layout.setSpacing(5)
+
+        self._thumbnail_labels = []
+        self.hide()
+
+    def set_thumbnails(self, frames: list[np.ndarray], count: int = 10):
+        """Set thumbnails from list of frames."""
+        # Clear existing
+        for label in self._thumbnail_labels:
+            self._layout.removeWidget(label)
+            label.deleteLater()
+        self._thumbnail_labels.clear()
+
+        # Create new thumbnails
+        for i in range(min(count, len(frames))):
+            label = QLabel()
+            label.setFixedSize(160, 90)
+            label.setStyleSheet("background-color: black; border: 1px solid #444;")
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            if i < len(frames) and frames[i] is not None:
+                height, width, channels = frames[i].shape
+                bytes_per_line = channels * width
+                qimage = QImage(
+                    frames[i].data, width, height, bytes_per_line,
+                    QImage.Format.Format_RGB888
+                ).copy()
+
+                pixmap = QPixmap.fromImage(qimage).scaled(
+                    160, 90,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.FastTransformation
+                )
+                label.setPixmap(pixmap)
+
+            self._thumbnail_labels.append(label)
+            self._layout.addWidget(label)
+
+        self._layout.addStretch()
 
 
 class TimeInfoOverlay(QLabel):

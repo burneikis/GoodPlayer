@@ -11,6 +11,8 @@ from collections import OrderedDict
 from fractions import Fraction
 from typing import Optional
 import numpy as np
+from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtCore import Qt
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -120,7 +122,16 @@ class VideoDecoder:
         # Frame cache
         self._cache: Optional[LRUCache] = None
         self._cache_seconds = cache_seconds
-        
+
+        # Thumbnail cache (separate from frame cache)
+        self._thumbnail_cache: dict[float, np.ndarray] = {}
+        self._thumbnail_cache_lock = threading.Lock()
+        self._thumbnail_cache_max_size = 100
+
+        # Separate container for thumbnails (don't block playback)
+        self._thumbnail_container: Optional[av.container.Container] = None
+        self._thumbnail_stream: Optional[av.video.VideoStream] = None
+
         # Worker thread for decoding
         self._request_queue: queue.PriorityQueue = queue.PriorityQueue()
         self._worker_thread: Optional[threading.Thread] = None
@@ -396,7 +407,102 @@ class VideoDecoder:
         request = FrameRequest(frame_index, priority=0)
         self._request_queue.put((0, request))
         return request
-    
+
+    def get_thumbnail_at_position(self, target_time: float) -> Optional[np.ndarray]:
+        """
+        Get a 320x180 thumbnail at the specified time.
+
+        Uses separate container and keyframe seeking for fast extraction
+        without blocking playback. Results cached with 0.2s granularity.
+
+        Args:
+            target_time: Target time in seconds
+
+        Returns:
+            320x180 RGB numpy array, or None on failure
+        """
+        if not self._container:
+            return None
+
+        target_time = max(0.0, min(target_time, self.duration))
+
+        # Round to 0.2s for cache key (better hit rate during scrubbing)
+        cache_key = round(target_time * 5) / 5
+
+        # Check cache first
+        with self._thumbnail_cache_lock:
+            if cache_key in self._thumbnail_cache:
+                return self._thumbnail_cache[cache_key]
+
+        # Cache miss - extract thumbnail
+        try:
+            # Ensure thumbnail container is open
+            self._ensure_thumbnail_container()
+
+            if not self._thumbnail_stream:
+                return None
+
+            # Seek to keyframe at or before target
+            target_pts = int(target_time / float(self._thumbnail_stream.time_base))
+            self._thumbnail_container.seek(
+                target_pts,
+                stream=self._thumbnail_stream,
+                backward=True,
+                any_frame=False  # Only keyframes
+            )
+
+            # Decode first frame (will be keyframe)
+            for frame in self._thumbnail_container.decode(video=0):
+                rgb_frame = frame.to_ndarray(format='rgb24')
+
+                # Resize using Qt (maintains quality, consistent with UI)
+                height, width, channels = rgb_frame.shape
+                bytes_per_line = channels * width
+
+                qimage = QImage(
+                    rgb_frame.data, width, height, bytes_per_line,
+                    QImage.Format.Format_RGB888
+                ).copy()
+
+                pixmap = QPixmap.fromImage(qimage).scaled(
+                    320, 180,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.FastTransformation
+                )
+
+                # Convert back to numpy
+                scaled_image = pixmap.toImage().convertToFormat(
+                    QImage.Format.Format_RGB888
+                )
+                w = scaled_image.width()
+                h = scaled_image.height()
+                ptr = scaled_image.bits()
+                ptr.setsize(h * w * 3)
+                thumbnail = np.frombuffer(ptr, np.uint8).reshape((h, w, 3)).copy()
+
+                # Store in cache with LRU eviction
+                with self._thumbnail_cache_lock:
+                    self._thumbnail_cache[cache_key] = thumbnail
+
+                    # LRU eviction
+                    if len(self._thumbnail_cache) > self._thumbnail_cache_max_size:
+                        oldest_key = next(iter(self._thumbnail_cache))
+                        del self._thumbnail_cache[oldest_key]
+
+                return thumbnail
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error extracting thumbnail at {target_time}s: {e}")
+            return None
+
+    def _ensure_thumbnail_container(self):
+        """Ensure thumbnail container is open."""
+        if self._thumbnail_container is None:
+            self._thumbnail_container = av.open(self.filepath)
+            self._thumbnail_stream = self._thumbnail_container.streams.video[0]
+
     def seek_to_frame(self, frame_index: int) -> None:
         """Seek to a specific frame index."""
         frame_index = max(0, min(frame_index, self.total_frames - 1))
@@ -471,12 +577,25 @@ class VideoDecoder:
         """Close the video file and release resources."""
         self._worker_running = False
         self._prefetch_running = False
-        
+
         if self._worker_thread:
             self._worker_thread.join(timeout=1.0)
         if self._prefetch_thread:
             self._prefetch_thread.join(timeout=1.0)
-        
+
+        # Close thumbnail container
+        if self._thumbnail_container:
+            try:
+                self._thumbnail_container.close()
+            except Exception:
+                pass
+            self._thumbnail_container = None
+            self._thumbnail_stream = None
+
+        # Clear thumbnail cache
+        with self._thumbnail_cache_lock:
+            self._thumbnail_cache.clear()
+
         if self._cache:
             self._cache.clear()
         if self._container:

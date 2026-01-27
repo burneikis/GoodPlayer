@@ -20,7 +20,8 @@ from src.playback_controller import PlaybackController
 from src.video_decoder import VideoDecoder
 from .widgets import (
     AudioMixerPanel, NotificationOverlay, WelcomeOverlay,
-    ClickableSlider, VideoWidget, TimeInfoOverlay, format_time
+    ClickableSlider, VideoWidget, TimeInfoOverlay, format_time,
+    ThumbnailPreviewWidget, ThumbnailRowWidget
 )
 from .theme import apply_dark_theme
 
@@ -84,6 +85,10 @@ class DualModeMainWindow(QMainWindow):
         self._frames_dropped = 0
         self._frame_timer = QElapsedTimer()
         self._frame_timer.start()  # Start immediately for step throttling
+
+        # Thumbnail state
+        self._thumbnail_preview_enabled = False
+        self._thumbnail_row_visible = False
 
         self._setup_ui()
         self._setup_timers()
@@ -186,8 +191,16 @@ class DualModeMainWindow(QMainWindow):
         self._timeline_slider.sliderPressed.connect(self._on_slider_pressed)
         self._timeline_slider.sliderReleased.connect(self._on_slider_released)
         self._timeline_slider.valueChanged.connect(self._on_slider_value_changed)
+        self._timeline_slider.hover_position.connect(self._on_slider_hover)
+        self._timeline_slider.hover_exit.connect(self._on_slider_hover_exit)
         controls_layout.addWidget(self._timeline_slider)
 
+        # Thumbnail widgets
+        self._thumbnail_preview = ThumbnailPreviewWidget(self._video_container)
+        self._thumbnail_row = ThumbnailRowWidget()
+
+        # Add thumbnail row above controls (hidden by default)
+        main_layout.addWidget(self._thumbnail_row)
         main_layout.addWidget(controls_panel)
         
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -345,6 +358,10 @@ class DualModeMainWindow(QMainWindow):
             self._timeline_slider.setEnabled(True)
             self._timeline_slider.setRange(0, self._frame_controller.total_frames - 1)
             self._timeline_slider.setValue(0)
+            self._timeline_slider.set_duration(self._frame_controller.duration)
+
+            # Enable thumbnail preview
+            self._thumbnail_preview_enabled = True
 
             # Setup audio mixer
             self._audio_mixer.setup_tracks(
@@ -627,6 +644,42 @@ class DualModeMainWindow(QMainWindow):
             self._display_current_frame()
             self._update_time_display()
 
+    def _on_slider_hover(self, timestamp: float) -> None:
+        """Handle slider hover - show thumbnail preview."""
+        if not self._frame_controller or not self._thumbnail_preview_enabled:
+            return
+
+        # Request thumbnail from decoder
+        thumbnail = self._frame_controller.video_decoder.get_thumbnail_at_position(timestamp)
+
+        if thumbnail is not None:
+            # Update thumbnail widget
+            self._thumbnail_preview.set_thumbnail(thumbnail)
+
+            # Get cursor position relative to slider
+            cursor_pos = self._timeline_slider.mapFromGlobal(self.cursor().pos())
+            widget_x_local = cursor_pos.x() - self._thumbnail_preview.width() // 2
+
+            # Clamp to slider bounds
+            max_x = self._timeline_slider.width() - self._thumbnail_preview.width()
+            widget_x_local = max(0, min(widget_x_local, max_x))
+
+            # Get global positions and calculate video container coordinates
+            slider_global = self._timeline_slider.mapToGlobal(self._timeline_slider.rect().topLeft())
+            container_global = self._video_container.mapToGlobal(self._video_container.rect().topLeft())
+
+            # Calculate position in video container coordinates
+            widget_x = slider_global.x() - container_global.x() + widget_x_local
+            widget_y = slider_global.y() - container_global.y() - self._thumbnail_preview.height() - 10
+
+            self._thumbnail_preview.move(widget_x, widget_y)
+            self._thumbnail_preview.show()
+            self._thumbnail_preview.raise_()
+
+    def _on_slider_hover_exit(self) -> None:
+        """Handle mouse leaving slider - hide thumbnail preview."""
+        self._thumbnail_preview.hide()
+
     def _change_volume(self, delta: float) -> None:
         if not self._frame_controller:
             return
@@ -731,6 +784,8 @@ class DualModeMainWindow(QMainWindow):
             self._toggle_audio_mixer()
         elif key == Qt.Key.Key_M:
             self._toggle_playback_mode()  # New: M to toggle mode
+        elif key == Qt.Key.Key_T:
+            self._toggle_thumbnail_row()
         else:
             super().keyPressEvent(event)
 
@@ -741,7 +796,39 @@ class DualModeMainWindow(QMainWindow):
         else:
             self._audio_mixer.show()
             self._show_notification("Mixer: On", 600)
-    
+
+    def _toggle_thumbnail_row(self) -> None:
+        """Toggle timeline thumbnail row."""
+        if not self._frame_controller:
+            return
+
+        self._thumbnail_row_visible = not self._thumbnail_row_visible
+
+        if self._thumbnail_row_visible:
+            # Generate thumbnails
+            self._generate_timeline_thumbnails()
+            self._thumbnail_row.show()
+            self._show_notification("Timeline: On", 600)
+        else:
+            self._thumbnail_row.hide()
+            self._show_notification("Timeline: Off", 600)
+
+    def _generate_timeline_thumbnails(self) -> None:
+        """Generate 10 thumbnails evenly spaced across timeline."""
+        if not self._frame_controller:
+            return
+
+        duration = self._frame_controller.duration
+        count = 10
+
+        frames = []
+        for i in range(count):
+            timestamp = (i / (count - 1)) * duration if count > 1 else 0
+            thumbnail = self._frame_controller.video_decoder.get_thumbnail_at_position(timestamp)
+            frames.append(thumbnail)
+
+        self._thumbnail_row.set_thumbnails(frames, count)
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_overlay_geometry()
