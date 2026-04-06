@@ -510,11 +510,16 @@ def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    app = QApplication(sys.argv)
-    apply_dark_theme(app)
-    
-    # Set application icon
+    # Set application identity BEFORE creating QApplication
+    # This ensures PulseAudio/PipeWire sees "GoodPlayer" instead of "python"
     import os
+    os.environ.setdefault('PULSE_PROP_application.name', 'GoodPlayer')
+    os.environ.setdefault('PULSE_PROP_media.role', 'video')
+    
+    app = QApplication(sys.argv)
+    app.setApplicationName('GoodPlayer')
+    app.setDesktopFileName('goodplayer')
+    apply_dark_theme(app)
     if getattr(sys, 'frozen', False):
         # Running as compiled executable
         base_path = sys._MEIPASS

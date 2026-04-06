@@ -8,6 +8,31 @@ import logging
 import numpy as np
 import sounddevice as sd
 import threading
+
+# Set PortAudio/PulseAudio application name so audio is properly attributed
+import os as _os
+_os.environ.setdefault('PULSE_PROP_application.name', 'GoodPlayer')
+_os.environ.setdefault('PULSE_PROP_media.role', 'video')
+
+
+def _find_pulse_device() -> Optional[int]:
+    """Find PulseAudio/PipeWire output device so audio is routable by Discord etc.
+    
+    Without this, PortAudio defaults to raw ALSA which bypasses PulseAudio/PipeWire
+    entirely, making the audio invisible to apps that capture via PulseAudio.
+    """
+    try:
+        devices = sd.query_devices()
+        # Prefer 'pulse', then 'pipewire' ALSA devices
+        for name_prefix in ('pulse', 'pipewire'):
+            for i, dev in enumerate(devices):
+                if (dev['max_output_channels'] > 0 and
+                        dev['name'].lower().startswith(name_prefix)):
+                    logger.info(f"Using audio device [{i}] {dev['name']} for PulseAudio/PipeWire routing")
+                    return i
+    except Exception as e:
+        logger.debug(f"Could not query audio devices: {e}")
+    return None
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -423,12 +448,14 @@ class AudioEngine:
             return
         
         if self._stream is None:
+            device = _find_pulse_device()
             self._stream = sd.OutputStream(
                 samplerate=self.TARGET_SAMPLE_RATE,
                 channels=self.TARGET_CHANNELS,
                 dtype=np.float32,
                 blocksize=self.BUFFER_SIZE,
-                callback=self._audio_callback
+                callback=self._audio_callback,
+                device=device,
             )
         
         self._playing = True
