@@ -407,11 +407,16 @@ class ThumbnailPreviewWidget(QLabel):
 
 
 class ThumbnailRowWidget(QWidget):
-    """Widget for displaying timeline thumbnail row."""
+    """Widget for displaying timeline thumbnail row.
+
+    Thumbnails are sized dynamically to fill the full row width so they
+    spread edge-to-edge regardless of display resolution or DPI scaling.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(120)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setStyleSheet(
             "background-color: rgba(0, 0, 0, 200); "
             "border-top: 1px solid #555;"
@@ -420,9 +425,31 @@ class ThumbnailRowWidget(QWidget):
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(5, 5, 5, 5)
         self._layout.setSpacing(5)
+        # Equal sizing for whatever children exist
+        self._layout.setStretch(0, 1)
 
-        self._thumbnail_labels = []
+        self._thumbnail_labels: list[QLabel] = []
+        self._frames: list[Optional[np.ndarray]] = []
         self.hide()
+
+    def _compute_thumb_size(self, count: int) -> tuple[int, int]:
+        """Compute per-thumbnail width/height from current widget size."""
+        if count <= 0:
+            return (0, 0)
+        margins = self._layout.contentsMargins()
+        spacing = self._layout.spacing()
+        avail_w = max(0, self.width() - margins.left() - margins.right()
+                      - spacing * (count - 1))
+        avail_h = max(0, self.height() - margins.top() - margins.bottom())
+        # Keep 16:9 aspect, fit within available cell
+        cell_w = avail_w // count
+        cell_h = avail_h
+        # Constrain to 16:9
+        if cell_w * 9 > cell_h * 16:
+            cell_w = (cell_h * 16) // 9
+        else:
+            cell_h = (cell_w * 9) // 16
+        return (max(1, cell_w), max(1, cell_h))
 
     def set_thumbnails(self, frames: list[np.ndarray], count: int = 10):
         """Set thumbnails from list of frames."""
@@ -432,32 +459,50 @@ class ThumbnailRowWidget(QWidget):
             label.deleteLater()
         self._thumbnail_labels.clear()
 
-        # Create new thumbnails
-        for i in range(min(count, len(frames))):
+        n = min(count, len(frames))
+        self._frames = list(frames[:n])
+
+        cell_w, cell_h = self._compute_thumb_size(n)
+
+        for i in range(n):
             label = QLabel()
-            label.setFixedSize(160, 90)
+            label.setMinimumSize(1, 1)
             label.setStyleSheet("background-color: black; border: 1px solid #444;")
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-            if i < len(frames) and frames[i] is not None:
-                height, width, channels = frames[i].shape
-                bytes_per_line = channels * width
-                qimage = QImage(
-                    frames[i].data, width, height, bytes_per_line,
-                    QImage.Format.Format_RGB888
-                ).copy()
-
-                pixmap = QPixmap.fromImage(qimage).scaled(
-                    160, 90,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.FastTransformation
-                )
-                label.setPixmap(pixmap)
-
+            label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self._thumbnail_labels.append(label)
-            self._layout.addWidget(label)
+            # Equal stretch so every cell gets the same share of the row
+            self._layout.addWidget(label, 1)
 
-        self._layout.addStretch()
+        self._rescale_pixmaps(cell_w, cell_h)
+
+    def _rescale_pixmaps(self, cell_w: int, cell_h: int) -> None:
+        """Rescale stored frames to the current cell size."""
+        if cell_w <= 0 or cell_h <= 0:
+            return
+        for i, label in enumerate(self._thumbnail_labels):
+            frame = self._frames[i] if i < len(self._frames) else None
+            if frame is None:
+                continue
+            height, width, channels = frame.shape
+            bytes_per_line = channels * width
+            qimage = QImage(
+                frame.data, width, height, bytes_per_line,
+                QImage.Format.Format_RGB888
+            ).copy()
+            pixmap = QPixmap.fromImage(qimage).scaled(
+                cell_w, cell_h,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation
+            )
+            label.setPixmap(pixmap)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        n = len(self._thumbnail_labels)
+        if n > 0:
+            cell_w, cell_h = self._compute_thumb_size(n)
+            self._rescale_pixmaps(cell_w, cell_h)
 
 
 class TimeInfoOverlay(QLabel):
