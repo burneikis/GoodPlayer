@@ -98,10 +98,6 @@ class DualModeMainWindow(QMainWindow):
         logger.info(f"DualModeMainWindow: Native player {'available' if QT_NATIVE_AVAILABLE else 'not available'}")
 
     def focusOutEvent(self, event):
-        # Hide overlays when window loses focus
-        self._time_label.hide_overlay()
-        self._frame_label.hide_overlay()
-        self._notification.hide()
         # Restore cursor so it isn't stuck hidden over other apps
         if hasattr(self, "_cursor_poll_timer"):
             self._cursor_poll_timer.stop()
@@ -109,10 +105,8 @@ class DualModeMainWindow(QMainWindow):
         super().focusOutEvent(event)
 
     def focusInEvent(self, event):
-        # Show overlays when window regains focus
-        self._time_label.show_overlay()
-        self._frame_label.show_overlay()
-        # Do not show notification overlay unless it was already visible before losing focus
+        # Overlays are now child widgets, so they follow window visibility
+        # automatically — no need to show/hide them on focus change.
         super().focusInEvent(event)
 
     def _setup_ui(self) -> None:
@@ -169,18 +163,19 @@ class DualModeMainWindow(QMainWindow):
         self._welcome_overlay = WelcomeOverlay(self._overlay_container)
         self._welcome_overlay.set_click_callback(self._open_file)
 
-        # Notification uses video_container as reference for positioning
-        # It's a top-level window so it can render over QVideoWidget
-        self._notification = NotificationOverlay(self._video_container, use_top_level=True)
-        
-        # Mode indicator
+        # Overlays are normal child widgets of the overlay container.
+        # Video is rendered through a QVideoSink-backed widget (not a
+        # hardware overlay surface), so they composite correctly and we
+        # don't need top-level windows that get hidden behind fullscreen
+        # on tiling WMs (e.g. i3).
+        self._notification = NotificationOverlay(self._overlay_container)
 
-        # Time info overlay (top-level window to render over QVideoWidget)
-        self._time_label = TimeInfoOverlay(self._video_container, align_right=False)
+        # Time info overlay (bottom-left)
+        self._time_label = TimeInfoOverlay(self._overlay_container, align_right=False)
         self._time_label.setText("00:00.000 / 00:00.000")
 
-        # Frame info overlay (top-level window to render over QVideoWidget)
-        self._frame_label = TimeInfoOverlay(self._video_container, align_right=True)
+        # Frame info overlay (bottom-right)
+        self._frame_label = TimeInfoOverlay(self._overlay_container, align_right=True)
         self._frame_label.setText("Frame: 0 / 0")
 
         # Controls panel

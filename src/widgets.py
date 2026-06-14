@@ -154,32 +154,20 @@ class AudioMixerPanel(QFrame):
 class NotificationOverlay(QLabel):
     DEFAULT_DURATION_MS = 1000
     NOTIFICATION_MARGIN = 10
-    """Overlay widget for showing action notifications."""
+    """Overlay widget for showing action notifications.
 
-    def __init__(self, parent=None, use_top_level: bool = False):
-        """
-        Initialize notification overlay.
-        
-        Args:
-            parent: Parent widget
-            use_top_level: If True, creates a top-level window that can render
-                          over hardware video surfaces (QVideoWidget)
-        """
-        if use_top_level:
-            super().__init__(None)  # No parent - top level window
-            self._parent_widget = parent
-            self.setWindowFlags(
-                Qt.WindowType.FramelessWindowHint |
-                Qt.WindowType.Tool |
-                Qt.WindowType.WindowStaysOnTopHint
-            )
-            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-            self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        else:
-            super().__init__(parent)
-            self._parent_widget = None
-        
-        self._use_top_level = use_top_level
+    Always a normal child widget of ``parent`` so it composites with the
+    rest of the UI under any window manager / fullscreen state. The
+    ``use_top_level`` argument is kept for backward compatibility but is
+    now ignored — the previous top-level-window mode broke on tiling WMs
+    (notably i3 on X11) where ``WindowStaysOnTopHint`` is ignored against
+    fullscreen windows.
+    """
+
+    def __init__(self, parent=None, use_top_level: bool = False):  # noqa: ARG002
+        super().__init__(parent)
+        # Don't block mouse events on the video area underneath.
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("""
             background-color: rgba(0, 0, 0, 180);
@@ -198,25 +186,15 @@ class NotificationOverlay(QLabel):
         """Show a notification that fades after duration."""
         self.setText(text)
         self.adjustSize()
-        
-        if self._use_top_level and self._parent_widget:
-            # Position relative to parent widget's global position
-            parent_global = self._parent_widget.mapToGlobal(self._parent_widget.rect().topLeft())
-            parent_rect = self._parent_widget.rect()
-            x = parent_global.x() + parent_rect.width() - self.width() - self.NOTIFICATION_MARGIN
-            y = parent_global.y() + self.NOTIFICATION_MARGIN
-            self.move(x, y)
-        elif self.parent():
-            # Position in top right of parent
-            parent_rect = self.parent().rect()
+        parent = self.parentWidget()
+        if parent is not None:
+            parent_rect = parent.rect()
             self.move(
                 parent_rect.width() - self.width() - self.NOTIFICATION_MARGIN,
-                self.NOTIFICATION_MARGIN
+                self.NOTIFICATION_MARGIN,
             )
-        
         self.show()
-        if not self._use_top_level:
-            self.raise_()
+        self.raise_()
         if duration_ms is None:
             duration_ms = self.DEFAULT_DURATION_MS
         self._timer.start(duration_ms)
@@ -508,47 +486,43 @@ class ThumbnailRowWidget(QWidget):
 class TimeInfoOverlay(QLabel):
     """
     Overlay widget for showing time/frame information.
-    Uses a frameless top-level window to render over video hardware overlays.
+
+    Implemented as a regular child widget of ``parent``. The previous
+    top-level-window implementation was needed only when video was drawn
+    on a hardware overlay surface (QVideoWidget) that child widgets
+    couldn't paint over. Now that video is rendered through a normal
+    widget (see VideoSinkWidget), overlays composite naturally and work
+    under every WM/fullscreen state.
     """
 
     def __init__(self, parent=None, align_right: bool = False):
-        super().__init__(None)  # No parent - top level window
-        self._parent_widget = parent
+        super().__init__(parent)
         self._align_right = align_right
         self._margin = 10
-        
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.Tool |
-            Qt.WindowType.WindowStaysOnTopHint
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setStyleSheet("color: white; font-family: monospace; background: transparent;")
         self.hide()
 
     def update_position(self) -> None:
-        """Update position relative to parent widget."""
-        if not self._parent_widget:
+        """Position within parent widget's local coordinates."""
+        parent = self.parentWidget()
+        if parent is None:
             return
-        
         self.adjustSize()
-        parent_global = self._parent_widget.mapToGlobal(self._parent_widget.rect().topLeft())
-        parent_rect = self._parent_widget.rect()
-        
+        parent_rect = parent.rect()
         if self._align_right:
-            x = parent_global.x() + parent_rect.width() - self.width() - self._margin
+            x = parent_rect.width() - self.width() - self._margin
         else:
-            x = parent_global.x() + self._margin
-        y = parent_global.y() + parent_rect.height() - self.height() - self._margin
-        
+            x = self._margin
+        y = parent_rect.height() - self.height() - self._margin
         self.move(x, y)
+        self.raise_()
 
     def show_overlay(self) -> None:
         """Show the overlay and update position."""
         self.update_position()
         self.show()
+        self.raise_()
 
     def hide_overlay(self) -> None:
         """Hide the overlay."""

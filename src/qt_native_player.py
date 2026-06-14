@@ -7,22 +7,82 @@ import logging
 from typing import Optional, Callable
 from pathlib import Path
 
-from PyQt6.QtCore import QUrl, QTimer, pyqtSignal, QObject
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import QUrl, QTimer, pyqtSignal, QObject, Qt, QRect, QSize
+from PyQt6.QtGui import QPainter, QImage
+from PyQt6.QtWidgets import QWidget, QSizePolicy
 
 logger = logging.getLogger(__name__)
 
 from src.audio_engine import AudioEngine  # If used, update to src import
 try:
-    from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-    from PyQt6.QtMultimediaWidgets import QVideoWidget
+    from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink, QVideoFrame
     QT_MULTIMEDIA_AVAILABLE = True
 except ImportError:
     QT_MULTIMEDIA_AVAILABLE = False
     logger.warning("PyQt6-Multimedia not installed. Install with: pip install PyQt6-Multimedia")
     QMediaPlayer = None
     QAudioOutput = None
-    QVideoWidget = None
+    QVideoSink = None
+    QVideoFrame = None
+
+
+class VideoSinkWidget(QWidget):
+    """
+    Widget that displays video frames via QVideoSink, painting them itself.
+
+    Unlike QVideoWidget, this is a normal widget surface (no hardware video
+    overlay plane). That means child-widget overlays (notifications, time
+    info, etc.) composite correctly on every platform/WM — in particular,
+    they no longer need to be separate top-level windows to render over the
+    video. This fixes the i3/X11 fullscreen overlay issue.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # We paint the whole surface every frame, so let Qt skip the
+        # background fill.
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setAutoFillBackground(False)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumSize(1, 1)
+        self.setStyleSheet("background-color: black;")
+
+        self._sink = QVideoSink(self) if QVideoSink is not None else None
+        if self._sink is not None:
+            self._sink.videoFrameChanged.connect(self._on_frame)
+        self._image: "QImage | None" = None
+
+    def videoSink(self):
+        """Return the QVideoSink to wire into QMediaPlayer."""
+        return self._sink
+
+    def _on_frame(self, frame) -> None:
+        if frame is None or not frame.isValid():
+            return
+        img = frame.toImage()
+        if img.isNull():
+            return
+        self._image = img
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), Qt.GlobalColor.black)
+        if self._image is None or self._image.isNull():
+            return
+        target = self.rect()
+        img_size = self._image.size()
+        scaled = img_size.scaled(target.size(), Qt.AspectRatioMode.KeepAspectRatio)
+        x = (target.width() - scaled.width()) // 2
+        y = (target.height() - scaled.height()) // 2
+        painter.drawImage(
+            QRect(x, y, scaled.width(), scaled.height()),
+            self._image,
+        )
+
+    def clear(self) -> None:
+        self._image = None
+        self.update()
 
 
 class QtNativePlayer(QObject):
@@ -58,11 +118,12 @@ class QtNativePlayer(QObject):
         self._parent = parent
         self._filepath: Optional[str] = None
         self._video_only = video_only
-        
-        # Create video widget for display
-        self._video_widget = QVideoWidget(parent)
-        self._video_widget.setStyleSheet("background-color: black;")
-        
+
+        # Create video widget for display.
+        # Use a QVideoSink-backed widget so overlays can be normal child
+        # widgets (no hardware overlay plane to fight with).
+        self._video_widget = VideoSinkWidget(parent)
+
         # Create audio output (muted if video_only mode)
         self._audio_output = QAudioOutput()
         if video_only:
@@ -70,10 +131,10 @@ class QtNativePlayer(QObject):
             self._audio_output.setMuted(True)
         else:
             self._audio_output.setVolume(1.0)
-        
+
         # Create media player
         self._player = QMediaPlayer()
-        self._player.setVideoOutput(self._video_widget)
+        self._player.setVideoSink(self._video_widget.videoSink())
         self._player.setAudioOutput(self._audio_output)
         
         # Connect signals
