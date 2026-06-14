@@ -103,8 +103,8 @@ class DualModeMainWindow(QMainWindow):
         self._frame_label.hide_overlay()
         self._notification.hide()
         # Restore cursor so it isn't stuck hidden over other apps
-        if hasattr(self, "_cursor_hide_timer"):
-            self._cursor_hide_timer.stop()
+        if hasattr(self, "_cursor_poll_timer"):
+            self._cursor_poll_timer.stop()
             self._show_cursor()
         super().focusOutEvent(event)
 
@@ -219,49 +219,51 @@ class DualModeMainWindow(QMainWindow):
         self._stats_timer.setInterval(self.STATS_INTERVAL_MS)
         self._stats_timer.timeout.connect(self._log_stats)
 
-        # Cursor auto-hide during playback
+        # Cursor auto-hide during playback.
+        # We poll the global cursor position because the native Qt video
+        # surface can swallow MouseMove events before Qt's event filter
+        # ever sees them.
         self._cursor_hidden = False
-        self._cursor_hide_timer = QTimer(self)
-        self._cursor_hide_timer.setSingleShot(True)
-        self._cursor_hide_timer.setInterval(self.CURSOR_HIDE_TIMEOUT_MS)
-        self._cursor_hide_timer.timeout.connect(self._hide_cursor)
-        # Watch all events at the application level to catch mouse moves over
-        # any child widget (video widget, overlays, etc.)
-        app = QApplication.instance()
-        if app is not None:
-            app.installEventFilter(self)
+        self._cursor_idle_ms = 0
+        self._last_cursor_pos = QCursor.pos()
+        self._cursor_poll_timer = QTimer(self)
+        self._cursor_poll_timer.setInterval(100)
+        self._cursor_poll_timer.timeout.connect(self._poll_cursor)
 
-    def eventFilter(self, obj, event):
-        et = event.type()
-        if et == QEvent.Type.MouseMove:
-            # Only react to mouse moves on widgets belonging to this window
-            try:
-                widget = obj if isinstance(obj, QWidget) else None
-                if widget is not None and widget.window() is self:
-                    self._on_user_mouse_activity()
-            except Exception:
-                pass
-        elif et in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease,
-                    QEvent.Type.Wheel, QEvent.Type.KeyPress):
-            try:
-                widget = obj if isinstance(obj, QWidget) else None
-                if widget is not None and widget.window() is self:
-                    self._on_user_mouse_activity()
-            except Exception:
-                pass
-        return super().eventFilter(obj, event)
+    def _poll_cursor(self) -> None:
+        """Periodically check cursor position; hide after idle, show on move."""
+        if not self._playing:
+            # Only auto-hide while playing
+            if self._cursor_hidden:
+                self._show_cursor()
+            self._cursor_poll_timer.stop()
+            return
 
-    def _on_user_mouse_activity(self) -> None:
-        """Show the cursor and (re)start the auto-hide timer if playing."""
-        if self._cursor_hidden:
-            self._show_cursor()
-        if self._playing:
-            self._cursor_hide_timer.start()
-        else:
-            self._cursor_hide_timer.stop()
+        pos = QCursor.pos()
+        if pos != self._last_cursor_pos:
+            self._last_cursor_pos = pos
+            self._cursor_idle_ms = 0
+            if self._cursor_hidden:
+                self._show_cursor()
+            return
+
+        # Cursor hasn't moved
+        self._cursor_idle_ms += self._cursor_poll_timer.interval()
+        if (not self._cursor_hidden
+                and self._cursor_idle_ms >= self.CURSOR_HIDE_TIMEOUT_MS
+                and self._cursor_over_window()):
+            self._hide_cursor()
+
+    def _cursor_over_window(self) -> bool:
+        try:
+            pos = QCursor.pos()
+            local = self.mapFromGlobal(pos)
+            return self.rect().contains(local) and self.isActiveWindow()
+        except Exception:
+            return False
 
     def _hide_cursor(self) -> None:
-        if self._cursor_hidden or not self._playing:
+        if self._cursor_hidden:
             return
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.BlankCursor))
         self._cursor_hidden = True
@@ -287,6 +289,10 @@ class DualModeMainWindow(QMainWindow):
             # Replace placeholder with native video widget
             self._video_stack.removeWidget(self._native_widget_placeholder)
             self._video_stack.insertWidget(1, self._native_player.video_widget)
+            try:
+                self._native_player.video_widget.setMouseTracking(True)
+            except Exception:
+                pass
             
             # Connect signals
             self._native_player.time_changed.connect(self._on_native_time_changed)
@@ -487,8 +493,10 @@ class DualModeMainWindow(QMainWindow):
         self._frame_controller.audio_engine.pause()
         
         self._playing = True
-        # Start cursor auto-hide countdown
-        self._cursor_hide_timer.start()
+        # Start cursor auto-hide polling
+        self._cursor_idle_ms = 0
+        self._last_cursor_pos = QCursor.pos()
+        self._cursor_poll_timer.start()
         
         # If already in native mode (paused), just resume
         if self._mode == PlaybackMode.NATIVE and self._native_player:
@@ -513,7 +521,7 @@ class DualModeMainWindow(QMainWindow):
             
         self._playing = False
         # Ensure cursor visible when paused
-        self._cursor_hide_timer.stop()
+        self._cursor_poll_timer.stop()
         self._show_cursor()
         
         if self._mode == PlaybackMode.NATIVE and self._native_player:
