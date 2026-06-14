@@ -8,6 +8,7 @@ import logging
 import numpy as np
 import sounddevice as sd
 import threading
+from typing import Optional
 
 # Set PortAudio/PulseAudio application name so audio is properly attributed
 import os as _os

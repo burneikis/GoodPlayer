@@ -12,8 +12,8 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QFileDialog, QSizePolicy, QStackedWidget
 )
-from PyQt6.QtCore import Qt, QTimer, QElapsedTimer, QSettings
-from PyQt6.QtGui import QKeyEvent, QIcon
+from PyQt6.QtCore import Qt, QTimer, QElapsedTimer, QSettings, QEvent
+from PyQt6.QtGui import QKeyEvent, QIcon, QCursor
 
 # Use absolute imports for local modules
 from src.playback_controller import PlaybackController
@@ -55,6 +55,7 @@ class DualModeMainWindow(QMainWindow):
     STATS_INTERVAL_MS = 5000
     REFRESH_HEADROOM_FACTOR = 0.85
     MIN_STEP_INTERVAL_MS = 30  # Minimum time between step operations
+    CURSOR_HIDE_TIMEOUT_MS = 2000  # Hide cursor after this idle period during playback
     
     # Settings keys
     SETTINGS_ORG = "GoodPlayer"
@@ -101,6 +102,10 @@ class DualModeMainWindow(QMainWindow):
         self._time_label.hide_overlay()
         self._frame_label.hide_overlay()
         self._notification.hide()
+        # Restore cursor so it isn't stuck hidden over other apps
+        if hasattr(self, "_cursor_hide_timer"):
+            self._cursor_hide_timer.stop()
+            self._show_cursor()
         super().focusOutEvent(event)
 
     def focusInEvent(self, event):
@@ -213,6 +218,59 @@ class DualModeMainWindow(QMainWindow):
         self._stats_timer = QTimer()
         self._stats_timer.setInterval(self.STATS_INTERVAL_MS)
         self._stats_timer.timeout.connect(self._log_stats)
+
+        # Cursor auto-hide during playback
+        self._cursor_hidden = False
+        self._cursor_hide_timer = QTimer(self)
+        self._cursor_hide_timer.setSingleShot(True)
+        self._cursor_hide_timer.setInterval(self.CURSOR_HIDE_TIMEOUT_MS)
+        self._cursor_hide_timer.timeout.connect(self._hide_cursor)
+        # Watch all events at the application level to catch mouse moves over
+        # any child widget (video widget, overlays, etc.)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        et = event.type()
+        if et == QEvent.Type.MouseMove:
+            # Only react to mouse moves on widgets belonging to this window
+            try:
+                widget = obj if isinstance(obj, QWidget) else None
+                if widget is not None and widget.window() is self:
+                    self._on_user_mouse_activity()
+            except Exception:
+                pass
+        elif et in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease,
+                    QEvent.Type.Wheel, QEvent.Type.KeyPress):
+            try:
+                widget = obj if isinstance(obj, QWidget) else None
+                if widget is not None and widget.window() is self:
+                    self._on_user_mouse_activity()
+            except Exception:
+                pass
+        return super().eventFilter(obj, event)
+
+    def _on_user_mouse_activity(self) -> None:
+        """Show the cursor and (re)start the auto-hide timer if playing."""
+        if self._cursor_hidden:
+            self._show_cursor()
+        if self._playing:
+            self._cursor_hide_timer.start()
+        else:
+            self._cursor_hide_timer.stop()
+
+    def _hide_cursor(self) -> None:
+        if self._cursor_hidden or not self._playing:
+            return
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.BlankCursor))
+        self._cursor_hidden = True
+
+    def _show_cursor(self) -> None:
+        if not self._cursor_hidden:
+            return
+        QApplication.restoreOverrideCursor()
+        self._cursor_hidden = False
     
     def _init_native_player(self) -> bool:
         """Initialize native player if available."""
@@ -429,6 +487,8 @@ class DualModeMainWindow(QMainWindow):
         self._frame_controller.audio_engine.pause()
         
         self._playing = True
+        # Start cursor auto-hide countdown
+        self._cursor_hide_timer.start()
         
         # If already in native mode (paused), just resume
         if self._mode == PlaybackMode.NATIVE and self._native_player:
@@ -452,6 +512,9 @@ class DualModeMainWindow(QMainWindow):
             return
             
         self._playing = False
+        # Ensure cursor visible when paused
+        self._cursor_hide_timer.stop()
+        self._show_cursor()
         
         if self._mode == PlaybackMode.NATIVE and self._native_player:
             # Pause both native video and our audio engine
