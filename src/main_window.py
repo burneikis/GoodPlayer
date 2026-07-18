@@ -6,6 +6,7 @@ Main window for video playback with keyboard controls (legacy mode).
 
 import sys
 import logging
+from typing import Optional
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,

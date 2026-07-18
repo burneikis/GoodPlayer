@@ -4,6 +4,7 @@ Provides reliable random access to individual video frames.
 """
 
 import av
+import itertools
 import logging
 import threading
 import queue
@@ -14,7 +15,6 @@ import numpy as np
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtCore import Qt
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -118,6 +118,11 @@ class VideoDecoder:
         # Decoder state (protected by lock)
         self._decoder_lock = threading.Lock()
         self._current_frame_index: int = -1
+        # Persistent decode iterator. Abandoning a PyAV decode() generator
+        # closes it, which flushes the codec into EOF/draining state and
+        # makes the next decode() call yield nothing. We therefore keep one
+        # iterator alive and only recreate it after an explicit seek.
+        self._frame_iter = None
         
         # Frame cache
         self._cache: Optional[LRUCache] = None
@@ -132,8 +137,12 @@ class VideoDecoder:
         self._thumbnail_container: Optional[av.container.Container] = None
         self._thumbnail_stream: Optional[av.video.VideoStream] = None
 
-        # Worker thread for decoding
+        # Worker thread for decoding.
+        # Queue entries are (priority, seq, request); the monotonically
+        # increasing seq breaks priority ties so FrameRequest objects are
+        # never compared (they have no ordering, which would raise TypeError).
         self._request_queue: queue.PriorityQueue = queue.PriorityQueue()
+        self._request_seq = itertools.count()
         self._worker_thread: Optional[threading.Thread] = None
         self._worker_running = False
         
@@ -236,6 +245,7 @@ class VideoDecoder:
         
         self._container.seek(0)
         self._current_frame_index = -1
+        self._frame_iter = None
         logger.info(f"Indexed {len(self._keyframe_index)} keyframes")
     
     def _start_workers(self) -> None:
@@ -252,7 +262,7 @@ class VideoDecoder:
         """Background worker that processes frame requests."""
         while self._worker_running:
             try:
-                priority, request = self._request_queue.get(timeout=0.1)
+                _priority, _seq, request = self._request_queue.get(timeout=0.1)
                 if request is None:
                     continue
                 
@@ -331,26 +341,20 @@ class VideoDecoder:
                 return cached
             
             # Determine if we need to seek
-            need_seek = False
-            if frame_index <= self._current_frame_index:
-                need_seek = True
-            elif frame_index > self._current_frame_index + 60:
-                need_seek = True
+            need_seek = (
+                self._frame_iter is None
+                or frame_index <= self._current_frame_index
+                or frame_index > self._current_frame_index + 60
+            )
             
             if need_seek:
-                kf_frame_index, kf_pts = self._find_nearest_keyframe(frame_index)
-                self._container.seek(kf_pts, stream=self._stream)
-                self._current_frame_index = kf_frame_index - 1
+                self._seek_locked(frame_index)
             
             # Decode forward to target
             result = None
             try:
-                for frame in self._container.decode(video=0):
-                    self._current_frame_index += 1
-                    self._frames_decoded += 1
-                    
-                    rgb_frame = frame.to_ndarray(format='rgb24')
-                    self._cache.put(self._current_frame_index, rgb_frame)
+                while True:
+                    rgb_frame = self._decode_one_locked()
                     
                     if self._current_frame_index == frame_index:
                         result = rgb_frame
@@ -364,6 +368,27 @@ class VideoDecoder:
                 pass
             
             return result
+    
+    def _seek_locked(self, frame_index: int) -> None:
+        """Seek to the keyframe before frame_index. Caller holds _decoder_lock."""
+        kf_frame_index, kf_pts = self._find_nearest_keyframe(frame_index)
+        self._container.seek(kf_pts, stream=self._stream)
+        self._current_frame_index = kf_frame_index - 1
+        self._frame_iter = self._container.decode(video=0)
+    
+    def _decode_one_locked(self) -> np.ndarray:
+        """Decode the next frame and cache it. Caller holds _decoder_lock.
+        
+        Raises StopIteration/av.EOFError at end of stream.
+        """
+        if self._frame_iter is None:
+            self._frame_iter = self._container.decode(video=0)
+        frame = next(self._frame_iter)
+        self._current_frame_index += 1
+        self._frames_decoded += 1
+        rgb_frame = frame.to_ndarray(format='rgb24')
+        self._cache.put(self._current_frame_index, rgb_frame)
+        return rgb_frame
     
     def get_frame(self, frame_index: int) -> Optional[np.ndarray]:
         """
@@ -405,7 +430,7 @@ class VideoDecoder:
         
         # Queue the request
         request = FrameRequest(frame_index, priority=0)
-        self._request_queue.put((0, request))
+        self._request_queue.put((0, next(self._request_seq), request))
         return request
 
     def get_thumbnail_at_position(self, target_time: float) -> Optional[np.ndarray]:
@@ -443,7 +468,10 @@ class VideoDecoder:
                 return None
 
             # Seek to keyframe at or before target
-            target_pts = int(target_time / float(self._thumbnail_stream.time_base))
+            time_base = self._thumbnail_stream.time_base
+            if not time_base:
+                return None
+            target_pts = int(target_time / float(time_base))
             self._thumbnail_container.seek(
                 target_pts,
                 stream=self._thumbnail_stream,
@@ -508,13 +536,14 @@ class VideoDecoder:
         frame_index = max(0, min(frame_index, self.total_frames - 1))
         
         with self._decoder_lock:
-            kf_frame_index, kf_pts = self._find_nearest_keyframe(frame_index)
-            self._container.seek(kf_pts, stream=self._stream)
-            self._current_frame_index = kf_frame_index - 1
+            self._seek_locked(frame_index)
             
-            # Decode forward to target
-            while self._current_frame_index < frame_index - 1:
-                self.decode_next_frame()
+            # Decode forward to just before target
+            try:
+                while self._current_frame_index < frame_index - 1:
+                    self._decode_one_locked()
+            except (av.EOFError, StopIteration):
+                pass
         
         # Update prefetch target
         with self._prefetch_lock:
@@ -524,18 +553,9 @@ class VideoDecoder:
         """Decode and return the next frame as a numpy array (RGB)."""
         with self._decoder_lock:
             try:
-                for frame in self._container.decode(video=0):
-                    self._current_frame_index += 1
-                    self._frames_decoded += 1
-                    
-                    rgb_frame = frame.to_ndarray(format='rgb24')
-                    self._cache.put(self._current_frame_index, rgb_frame)
-                    
-                    return rgb_frame
+                return self._decode_one_locked()
             except (av.EOFError, StopIteration):
                 return None
-            
-            return None
     
     def frame_to_time(self, frame_index: int) -> float:
         """Convert frame index to time in seconds."""

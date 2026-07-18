@@ -10,14 +10,14 @@ from typing import Optional, Callable
 from enum import Enum, auto
 import numpy as np
 
-from video_decoder import VideoDecoder
-from audio_engine import AudioEngine
+from src.video_decoder import VideoDecoder
+from src.audio_engine import AudioEngine
 
 logger = logging.getLogger(__name__)
 
 # Check for native player availability
 try:
-    from .native_player import NativePlayer, is_available as native_available
+    from src.native_player import NativePlayer, is_available as native_available
     NATIVE_PLAYER_AVAILABLE = native_available()
 except ImportError:
     NATIVE_PLAYER_AVAILABLE = False
@@ -336,17 +336,18 @@ class HybridPlaybackController:
     # === Audio Control ===
     
     def set_track_volume(self, track_index: int, volume: float) -> None:
-        """Set volume for an audio track."""
+        """Set volume for an audio track.
+
+        Only affects the frame-accurate audio engine. The native player's
+        master volume is intentionally left alone: coupling it to a single
+        track's volume would break per-track mixing (e.g. muting track 2
+        would mute everything).
+        """
         self._audio_engine.set_track_volume(track_index, volume)
-        # Also update native player if using it
-        if self._native_player:
-            self._native_player.set_volume(volume)
     
     def set_track_muted(self, track_index: int, muted: bool) -> None:
         """Mute or unmute an audio track."""
         self._audio_engine.set_track_muted(track_index, muted)
-        if self._native_player:
-            self._native_player.set_muted(muted)
     
     # === Callbacks ===
     

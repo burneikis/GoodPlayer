@@ -262,7 +262,7 @@ class ClickableSlider(QSlider):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._dragging = True
-            self._update_value_from_pos(event.position().x())
+            self._update_value_from_pos(event.position())
             self.sliderPressed.emit()
             event.accept()
         else:
@@ -270,7 +270,7 @@ class ClickableSlider(QSlider):
 
     def mouseMoveEvent(self, event):
         if self._dragging:
-            self._update_value_from_pos(event.position().x())
+            self._update_value_from_pos(event.position())
             self.sliderMoved.emit(self.value())
             event.accept()
         else:
@@ -300,15 +300,15 @@ class ClickableSlider(QSlider):
         """Override to use our custom dragging state."""
         return self._dragging or super().isSliderDown()
 
-    def _update_value_from_pos(self, x_pos: float) -> None:
-        """Update slider value based on x position."""
+    def _update_value_from_pos(self, pos) -> None:
+        """Update slider value based on mouse position (QPointF)."""
         if self.orientation() == Qt.Orientation.Horizontal:
-            ratio = max(0.0, min(1.0, x_pos / self.width()))
-            value = self.minimum() + (self.maximum() - self.minimum()) * ratio
+            ratio = pos.x() / self.width() if self.width() > 0 else 0.0
         else:
-            ratio = max(0.0, min(1.0, (self.height() - x_pos) / self.height()))
-            value = self.minimum() + (self.maximum() - self.minimum()) * ratio
-        self.setValue(int(value))
+            ratio = (self.height() - pos.y()) / self.height() if self.height() > 0 else 0.0
+        ratio = max(0.0, min(1.0, ratio))
+        value = self.minimum() + (self.maximum() - self.minimum()) * ratio
+        self.setValue(round(value))
 
 
 class VideoWidget(QLabel):
@@ -530,7 +530,12 @@ class TimeInfoOverlay(QLabel):
 
 
 def format_time(seconds: float) -> str:
-    """Format seconds as MM:SS.mmm"""
-    mins = int(seconds) // 60
+    """Format seconds as MM:SS.mmm, or H:MM:SS.mmm for durations >= 1 hour."""
+    seconds = max(0.0, seconds)
+    hours = int(seconds) // 3600
+    mins = (int(seconds) % 3600) // 60
     secs = seconds % 60
-    return f"{mins:02d}:{secs:06.3f}"# ...existing code from widgets.py will be moved here...
+    if hours > 0:
+        return f"{hours}:{mins:02d}:{secs:06.3f}"
+    return f"{mins:02d}:{secs:06.3f}"
+

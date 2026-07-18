@@ -13,7 +13,6 @@ from PyQt6.QtWidgets import QWidget, QSizePolicy
 
 logger = logging.getLogger(__name__)
 
-from src.audio_engine import AudioEngine  # If used, update to src import
 try:
     from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink, QVideoFrame
     QT_MULTIMEDIA_AVAILABLE = True

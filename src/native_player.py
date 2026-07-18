@@ -150,8 +150,16 @@ class NativePlayer:
                 self._player.pause = True
                 self._player.loadfile(filepath)
                 
-                # Wait for file to load
-                self._player.wait_for_playback()
+                # Wait for the file to load (not for playback to end --
+                # wait_for_playback() would block until EOF/idle, which with
+                # keep-open=yes and pause=True can hang indefinitely).
+                # Poll for duration becoming available with a short timeout.
+                import time as _time
+                deadline = _time.monotonic() + 5.0
+                while _time.monotonic() < deadline:
+                    if self._player.duration is not None:
+                        break
+                    _time.sleep(0.02)
                 
                 logger.info(f"NativePlayer: Opened {Path(filepath).name}")
                 return True

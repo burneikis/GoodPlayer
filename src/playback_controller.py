@@ -103,7 +103,6 @@ class PlaybackController:
         
         # State
         self._playing = False
-        self._needs_audio_sync = False  # Flag to indicate audio needs to be synced
         self._lock = threading.Lock()
         
         # Callbacks for state changes
@@ -164,8 +163,6 @@ class PlaybackController:
             if self._playing:
                 return
             self._playing = True
-            needs_sync = self._needs_audio_sync
-            self._needs_audio_sync = False
         
         # Get the current manual time (where we should start playing from)
         target_time = self._clock.get_manual_time()
@@ -214,12 +211,8 @@ class PlaybackController:
         if was_playing:
             self.pause()
         
-        # Update clock
+        # Update clock (audio is re-synced from manual time on next play())
         self._clock.set_manual_time(time_seconds)
-        
-        # Mark that audio needs sync (will happen on play)
-        with self._lock:
-            self._needs_audio_sync = True
         
         if was_playing:
             self.play()
@@ -239,11 +232,6 @@ class PlaybackController:
             self.pause()
         
         self._clock.step_by_frames(num_frames)
-        
-        # Mark that audio needs to be synced when we resume
-        with self._lock:
-            self._needs_audio_sync = True
-        
         return self.get_current_frame()
     
     def step_backward(self, num_frames: int = 1) -> Optional[np.ndarray]:
@@ -256,11 +244,6 @@ class PlaybackController:
             self.pause()
         
         self._clock.step_by_frames(-num_frames)
-        
-        # Mark that audio needs to be synced when we resume
-        with self._lock:
-            self._needs_audio_sync = True
-        
         return self.get_current_frame()
     
     def get_current_frame(self) -> Optional[np.ndarray]:

@@ -15,6 +15,8 @@ import os as _os
 _os.environ.setdefault('PULSE_PROP_application.name', 'GoodPlayer')
 _os.environ.setdefault('PULSE_PROP_media.role', 'video')
 
+logger = logging.getLogger(__name__)
+
 
 def _find_pulse_device() -> Optional[int]:
     """Find PulseAudio/PipeWire output device so audio is routable by Discord etc.
@@ -34,9 +36,6 @@ def _find_pulse_device() -> Optional[int]:
     except Exception as e:
         logger.debug(f"Could not query audio devices: {e}")
     return None
-from typing import Optional
-
-logger = logging.getLogger(__name__)
 
 
 class RingBuffer:
@@ -53,10 +52,18 @@ class RingBuffer:
         self._capacity = max_samples
         self._lock = threading.Lock()
         self._underruns = 0
+        self._dropped = 0
     
     def write(self, data: np.ndarray) -> int:
+        """Write samples; returns number actually written.
+
+        If the buffer is full, excess samples are dropped and counted in
+        ``dropped`` so callers can detect and log desync conditions.
+        """
         with self._lock:
             samples_to_write = min(len(data), self._capacity - self._size)
+            if samples_to_write < len(data):
+                self._dropped += len(data) - samples_to_write
             if samples_to_write == 0:
                 return 0
             
@@ -112,6 +119,11 @@ class RingBuffer:
     def underruns(self) -> int:
         with self._lock:
             return self._underruns
+    
+    @property
+    def dropped(self) -> int:
+        with self._lock:
+            return self._dropped
     
     def reset_underruns(self) -> None:
         with self._lock:
@@ -179,7 +191,13 @@ class AudioTrack:
                 elif audio_data.shape[1] > self.target_channels:
                     audio_data = audio_data[:, :self.target_channels]
                 
-                self.buffer.write(audio_data.astype(np.float32))
+                data = audio_data.astype(np.float32)
+                written = self.buffer.write(data)
+                if written < len(data):
+                    logger.debug(
+                        f"Audio buffer full: dropped {len(data) - written} samples "
+                        f"(total dropped: {self.buffer.dropped})"
+                    )
                 
         except Exception as e:
             logger.debug(f"Audio decode error: {e}")
@@ -254,11 +272,19 @@ class AudioEngine:
     
     def _decoder_loop(self) -> None:
         while self._decoder_running:
+            # Grab any pending seek request while holding the lock, but
+            # perform the (potentially slow) seek + prefill outside it so
+            # callers of seek() are not blocked waiting on decode work.
+            seek_time: Optional[float] = None
             with self._seek_lock:
                 if self._seek_requested is not None:
-                    self._perform_seek(self._seek_requested)
+                    seek_time = self._seek_requested
                     self._seek_requested = None
-                    self._seek_complete.set()
+            
+            if seek_time is not None:
+                self._perform_seek(seek_time)
+                self._seek_complete.set()
+                continue
             
             if not self._tracks:
                 threading.Event().wait(0.1)
@@ -551,9 +577,11 @@ class AudioEngine:
     @property
     def stats(self) -> dict:
         track_underruns = sum(t.buffer.underruns for t in self._tracks)
+        track_dropped = sum(t.buffer.dropped for t in self._tracks)
         return {
             "callback_underruns": self._callback_underruns,
             "track_buffer_underruns": track_underruns,
+            "track_buffer_dropped": track_dropped,
             "total_callbacks": self._total_callbacks,
             "underrun_rate": self._callback_underruns / max(1, self._total_callbacks)
         }

@@ -365,7 +365,9 @@ class DualModeMainWindow(QMainWindow):
                 # Resync if drift exceeds 200ms (increased threshold to reduce stuttering)
                 if drift > 0.2:
                     logger.debug(f"Audio drift detected: {drift:.3f}s, resyncing")
-                    self._frame_controller.audio_engine.seek(time_pos)
+                    # Non-blocking: this runs on the Qt main thread, so we
+                    # must not wait for the audio decoder to finish seeking.
+                    self._frame_controller.audio_engine.seek(time_pos, blocking=False)
                     self._frame_controller.audio_engine.play()
     
     def _on_native_playback_ended(self) -> None:
