@@ -22,13 +22,15 @@ fn main() {
     goodplayer::media::init();
     let path = std::env::args().nth(1).expect("usage: bench FILE");
     let t = Instant::now();
-    let mut p = Player::open(
-        path.as_ref(),
-        Rc::new(AudioOutput::silent()),
-        512 << 20,
-        || {},
-    )
-    .unwrap();
+    // BENCH_DEVICE=1 uses the real audio device, muted.
+    let output = if std::env::var_os("BENCH_DEVICE").is_some() {
+        let out = AudioOutput::open();
+        out.set_master(0.0);
+        out
+    } else {
+        AudioOutput::silent()
+    };
+    let mut p = Player::open(path.as_ref(), Rc::new(output), 512 << 20, || {}).unwrap();
     let first = wait(&mut p, None);
     println!(
         "open {:?}, first frame {:?} ({} audio tracks, {:.2} fps, {:.0}s)",
