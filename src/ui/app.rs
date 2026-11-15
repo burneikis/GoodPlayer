@@ -14,6 +14,8 @@ use crate::profile::Profile;
 const CURSOR_HIDE_AFTER: Duration = Duration::from_secs(2);
 /// Height of the seek bar overlay at the bottom of the video.
 const CONTROLS_HEIGHT: f32 = 34.0;
+/// How far the time/frame labels dip into the controls area when lifted.
+const LABEL_OVERLAP: f32 = 14.0;
 /// Height of the gradient that keeps the overlay readable on bright video.
 const CONTROLS_SHADE: f32 = 80.0;
 /// Seconds for the overlay to fade in or out.
@@ -585,8 +587,10 @@ impl App {
             painter.text(pos, align, text, small.clone(), Color32::WHITE);
         };
         let margin = 10.0;
-        // Labels ride above the timeline while it is shown.
-        let lift = CONTROLS_HEIGHT * controls_fade;
+        // Labels ride just above the timeline while it is shown. The bar's
+        // track sits partway down the controls area, so the labels can
+        // overlap its empty top padding.
+        let lift = (CONTROLS_HEIGHT - LABEL_OVERLAP) * controls_fade;
         if let Some(p) = &self.player {
             shadowed(
                 rect.left_bottom() + vec2(margin, -margin - lift),
