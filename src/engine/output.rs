@@ -326,17 +326,37 @@ impl AudioOutput {
     /// Seconds of audio heard since the last flush, interpolated between
     /// device callbacks so the picture moves smoothly.
     pub fn clock(&self) -> f64 {
-        let s = &self.shared;
-        let (played, heard_at) = s.mark();
-        let delivered = s.played.load(Ordering::Acquire);
-        let rate = f64::from(s.rate);
-        if !s.running.load(Ordering::Acquire) {
-            return delivered as f64 / rate;
-        }
-        let since = (s.now_ns() as f64 - heard_at as f64) / 1e9;
-        let frames = (played as f64 + since * rate).clamp(0.0, delivered as f64);
-        frames / rate
+        clock_of(&self.shared)
     }
+
+    /// A handle other threads can read the clock through.
+    pub fn clock_handle(&self) -> Clock {
+        Clock(Arc::clone(&self.shared))
+    }
+}
+
+/// Read-only access to the playback clock from any thread.
+#[derive(Clone)]
+pub struct Clock(Arc<Shared>);
+
+impl Clock {
+    pub fn seconds(&self) -> f64 {
+        clock_of(&self.0)
+    }
+}
+
+fn clock_of(s: &Shared) -> f64 {
+    let (played, heard_at) = s.mark();
+    let delivered = s.played.load(Ordering::Acquire);
+    let rate = f64::from(s.rate);
+    if !s.running.load(Ordering::Acquire) {
+        // Stopped: the transport holds the position; the clock restarts
+        // from zero when it next runs.
+        return 0.0;
+    }
+    let since = (s.now_ns() as f64 - heard_at as f64) / 1e9;
+    let frames = (played as f64 + since * rate).clamp(0.0, delivered as f64);
+    frames / rate
 }
 
 impl Drop for AudioOutput {

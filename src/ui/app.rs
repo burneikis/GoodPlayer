@@ -151,6 +151,9 @@ impl App {
             }
         });
         let events = ctx.input(|i| i.events.clone());
+        if !events.is_empty() {
+            log::debug!("events {events:?}");
+        }
         for event in events {
             match event {
                 egui::Event::Key {

@@ -5,12 +5,14 @@
 //! from an older epoch.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::JoinHandle;
 
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender, bounded, select, unbounded};
 
 use super::cache::{self, FrameCache, Key};
+use super::output::Clock;
 use crate::media::video::VideoDecoder;
 use crate::media::{MediaInfo, VideoFrame};
 
@@ -19,6 +21,38 @@ const PLAY_AHEAD: usize = 4;
 /// How far a running decoder may be behind a target and still read through
 /// to it rather than seek.
 const READ_THROUGH_SECONDS: f64 = 3.0;
+/// Playback this far behind the clock jumps ahead instead of catching up
+/// frame by frame.
+const RESYNC_SECONDS: f64 = 1.0;
+
+/// Where playback is, readable from the video thread: the media time the
+/// clock started at, plus the clock.
+#[derive(Clone)]
+pub struct Playhead {
+    origin: Arc<AtomicU64>,
+    clock: Clock,
+}
+
+impl Playhead {
+    pub fn new(clock: Clock) -> Self {
+        Self {
+            origin: Arc::new(AtomicU64::new(0f64.to_bits())),
+            clock,
+        }
+    }
+
+    pub fn set_origin(&self, time: f64) {
+        self.origin.store(time.to_bits(), Ordering::Release);
+    }
+
+    pub fn origin(&self) -> f64 {
+        f64::from_bits(self.origin.load(Ordering::Acquire))
+    }
+
+    pub fn now(&self) -> f64 {
+        self.origin() + self.clock.seconds()
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum Cmd {
@@ -65,6 +99,7 @@ impl VideoWorker {
     pub fn spawn(
         info: &MediaInfo,
         cache_bytes: usize,
+        playhead: Playhead,
         wake: impl Fn() + Send + 'static,
     ) -> Result<Self> {
         let decoder = VideoDecoder::open(info)?;
@@ -82,6 +117,7 @@ impl VideoWorker {
             out: msg_tx,
             wake: Box::new(wake),
             deferred: None,
+            playhead,
         };
         let thread = std::thread::Builder::new()
             .name("video-decode".into())
@@ -126,6 +162,7 @@ struct Worker {
     wake: Box<dyn Fn() + Send>,
     /// A command that arrived while a send was blocked.
     deferred: Option<Cmd>,
+    playhead: Playhead,
 }
 
 enum Flow {
@@ -256,39 +293,46 @@ impl Worker {
 
     /// Exactly the frame on screen at `time`.
     fn frame_at(&mut self, time: f64) -> Option<Arc<VideoFrame>> {
-        if let Some(f) = self.cache.at(time, self.slack) {
-            return Some(f);
-        }
+        self.cache
+            .at(time, self.slack)
+            .or_else(|| self.decode_to(time))
+    }
+
+    /// Decode up to the frame on screen at `time`, leaving the decoder just
+    /// past it (so its successor is decoded and linked too).
+    fn decode_to(&mut self, time: f64) -> Option<Arc<VideoFrame>> {
         let center = cache::key(time);
         let limit = time + self.slack;
         let reading_through = !self.eof
             && self.last.is_some_and(|l| {
                 cache::time(l) <= limit && time - cache::time(l) < READ_THROUGH_SECONDS
             });
-        let mut prev = if reading_through {
-            self.last.and_then(|l| self.cache.get(l))
-        } else {
-            None
-        };
-        // A seek can land after the target on a bad index; back off.
-        for back in [0.0, 1.0, 4.0, 15.0] {
-            if !reading_through {
-                self.reposition(time - back);
-                prev = None;
-            }
-            let mut first = true;
-            loop {
-                match self.decode(center) {
-                    Some(f) if f.time > limit => {
-                        if first && prev.is_none() && time - back > 0.0 && !reading_through {
-                            break; // landed past the target: seek further back
-                        }
-                        return prev.or(Some(f));
-                    }
-                    Some(f) => prev = Some(f),
-                    None => return prev,
+        if reading_through {
+            let mut prev = self.last.and_then(|l| self.cache.get(l));
+            while let Some(f) = self.decode(center) {
+                if f.time > limit {
+                    return prev.or(Some(f));
                 }
-                first = false;
+                prev = Some(f);
+            }
+            return prev;
+        }
+        // A seek can land after the target on a bad index; back off.
+        let mut prev = None;
+        for back in [0.0, 1.0, 4.0, 15.0] {
+            self.reposition(time - back);
+            prev = None;
+            while let Some(f) = self.decode(center) {
+                if f.time > limit {
+                    if prev.is_none() && time - back > 0.0 && back < 15.0 {
+                        break; // landed past the target: seek further back
+                    }
+                    return prev.or(Some(f));
+                }
+                prev = Some(f);
+            }
+            if prev.is_some() {
+                return prev; // end of stream
             }
         }
         prev
@@ -348,7 +392,7 @@ impl Worker {
         }
         // Get the decoder onto `from`; decoding the frame on screen also
         // decodes (and links) the one after it.
-        self.frame_at(cache::time(from));
+        self.decode_to(cache::time(from));
         match self.cache.next(from) {
             Some(f) => Some(f),
             None if self.last == Some(from) => self.decode(from),
@@ -402,19 +446,41 @@ impl Worker {
             if self.deferred.is_some() || !self.cmds.is_empty() {
                 return Flow::Continue;
             }
-            self.current = Some(cursor);
-            let next = match self.cache.next(cursor) {
-                Some(f) => Some(f),
-                None if self.last == Some(cursor) => self.decode(cursor),
-                None if self.cache.is_last(cursor) => None,
-                None => self.step_forward(cursor),
+            let next = loop {
+                self.current = Some(cursor);
+                let next = match self.cache.next(cursor) {
+                    Some(f) => Some(f),
+                    None if self.last == Some(cursor) => self.decode(cursor),
+                    None if self.cache.is_last(cursor) => None,
+                    None => self.step_forward(cursor),
+                };
+                // Behind the clock (a stalled window, a slow decode): drop
+                // late frames, and jump if hopelessly behind.
+                let Some(f) = next else { break None };
+                let now = self.playhead.now();
+                if f.time + self.frame_dur >= now {
+                    break Some(f);
+                }
+                if now - f.time > RESYNC_SECONDS {
+                    break self.decode_to(now + 0.25).or(Some(f));
+                }
+                cursor = cache::key(f.time);
             };
             msg = match next {
                 Some(f) => {
                     cursor = cache::key(f.time);
                     Msg::Frame { epoch, frame: f }
                 }
-                None => return self.emit(Msg::Edge { epoch, end: true }),
+                None => {
+                    log::debug!(
+                        "playback ended at {:.3}s (eof={}, last={:?}, is_last={})",
+                        cache::time(cursor),
+                        self.eof,
+                        self.last.map(cache::time),
+                        self.cache.is_last(cursor)
+                    );
+                    return self.emit(Msg::Edge { epoch, end: true });
+                }
             };
         }
     }

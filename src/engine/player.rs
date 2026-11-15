@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 use super::output::{AudioOutput, TrackControl};
-use super::video::{Cmd, Msg, VideoWorker};
+use super::video::{Cmd, Msg, Playhead, VideoWorker};
 use crate::media::audio::AudioWorker;
 use crate::media::{MediaInfo, VideoFrame};
 
@@ -37,13 +37,14 @@ pub struct Player {
     output: Rc<AudioOutput>,
     video: VideoWorker,
     audio: Option<AudioWorker>,
+    playhead: Playhead,
+    /// The mixer flush the current start is waiting on.
+    flush: u64,
     epoch: u64,
     state: State,
     started: Instant,
     shown: Option<Arc<VideoFrame>>,
     queued: VecDeque<Arc<VideoFrame>>,
-    /// Media time at which the clock was last started.
-    origin: f64,
     /// Where the playhead is while paused.
     position: f64,
     video_ended: bool,
@@ -65,19 +66,21 @@ impl Player {
         } else {
             Some(AudioWorker::spawn(&info, producers, output.handle())?)
         };
-        let video = VideoWorker::spawn(&info, cache_bytes, wake)?;
+        let playhead = Playhead::new(output.clock_handle());
+        let video = VideoWorker::spawn(&info, cache_bytes, playhead.clone(), wake)?;
         let mut player = Self {
             info,
             tracks,
             output,
             video,
             audio,
+            playhead,
+            flush: 0,
             epoch: 0,
             state: State::Paused,
             started: Instant::now(),
             shown: None,
             queued: VecDeque::new(),
-            origin: 0.0,
             position: 0.0,
             video_ended: false,
             at_end: false,
@@ -98,7 +101,7 @@ impl Player {
     /// Current playhead in media seconds.
     pub fn time(&self) -> f64 {
         match self.state {
-            State::Playing => (self.origin + self.output.clock()).min(self.info.duration),
+            State::Playing => self.playhead.now().min(self.info.duration),
             _ => self.position,
         }
     }
@@ -190,11 +193,12 @@ impl Player {
         if let Some(audio) = &self.audio {
             audio.seek(time, flush);
         }
+        self.flush = flush;
+        self.playhead.set_origin(time);
         self.video.send(Cmd::Play {
             time,
             epoch: self.epoch,
         });
-        self.origin = time;
         self.position = time;
         self.state = State::Starting;
         self.started = Instant::now();
@@ -242,7 +246,10 @@ impl Player {
             State::Starting => {
                 let audio_ready = self.audio.as_ref().is_none_or(AudioWorker::primed);
                 let video_ready = !self.queued.is_empty() || self.video_ended;
-                if (audio_ready && video_ready) || self.started.elapsed() > START_TIMEOUT {
+                let flushed = self.output.is_flushed(self.flush);
+                if flushed
+                    && ((audio_ready && video_ready) || self.started.elapsed() > START_TIMEOUT)
+                {
                     if let Some(first) = self.queued.pop_front() {
                         self.shown = Some(first);
                     }

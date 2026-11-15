@@ -209,3 +209,30 @@ fn playback_stops_on_the_last_frame() {
     p.update();
     assert!(p.time() < 1.0);
 }
+
+#[test]
+fn video_catches_up_after_the_ui_stalls() {
+    let mut p = open();
+    settle(&mut p, None);
+    p.play();
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_millis(300) {
+        p.update();
+        std::thread::sleep(Duration::from_millis(4));
+    }
+    // A hidden window: nothing pumps the player for two seconds.
+    std::thread::sleep(Duration::from_secs(2));
+    let resumed = Instant::now();
+    while resumed.elapsed() < Duration::from_millis(400) {
+        p.update();
+        std::thread::sleep(Duration::from_millis(4));
+    }
+    let shown = p.frame().unwrap().time;
+    let t = p.time();
+    p.pause();
+    assert!(t > 2.4, "clock kept running: {t}");
+    assert!(
+        t - shown < 0.15,
+        "picture {shown:.3}s is behind the clock {t:.3}s"
+    );
+}
