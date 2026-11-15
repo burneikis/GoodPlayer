@@ -1,0 +1,40 @@
+[package]
+name = "goodplayer"
+version = "2.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "Frame-accurate video player with simultaneous multi-track audio"
+repository = "https://github.com/burneikis/goodplayer"
+default-run = "goodplayer"
+
+[[bin]]
+name = "goodplayer"
+path = "src/bin/goodplayer.rs"
+
+[[bin]]
+name = "doesplayer"
+path = "src/bin/doesplayer.rs"
+
+[dependencies]
+anyhow = "1"
+cpal = "0.18"
+crossbeam-channel = "0.5"
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "wayland", "x11", "persistence"] }
+ffmpeg-next = { version = "9.1", default-features = false, features = ["codec", "format", "software-resampling", "software-scaling"] }
+log = "0.4"
+env_logger = { version = "0.11", default-features = false, features = ["auto-color"] }
+rfd = "0.18"
+rtrb = "0.3"
+pollster = "0.4"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
