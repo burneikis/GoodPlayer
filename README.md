@@ -34,6 +34,7 @@ engine and mixer, without thumbnails or the frame counter.
 | `T` | Thumbnail strip (GoodPlayer) |
 | `F`, `F11`, double-click | Fullscreen (`Esc` leaves) |
 | `Ctrl+O` | Open a file |
+| `?` | Show / hide keybinds |
 
 Clicking or dragging the timeline seeks; holding a step key steps
 continuously.

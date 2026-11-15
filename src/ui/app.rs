@@ -20,6 +20,10 @@ const VIDEO_EXTENSIONS: &[&str] = &[
     "mp4", "mkv", "mov", "avi", "webm", "m4v", "flv", "wmv", "mpg", "mpeg", "ts", "m2ts", "mts",
     "3gp", "ogv",
 ];
+#[cfg(target_os = "macos")]
+const OPEN_KEY: &str = "Cmd+O";
+#[cfg(not(target_os = "macos"))]
+const OPEN_KEY: &str = "Ctrl+O";
 
 pub struct App {
     profile: &'static Profile,
@@ -32,6 +36,7 @@ pub struct App {
     muted: bool,
     show_mixer: bool,
     show_strip: bool,
+    show_help: bool,
     fullscreen: bool,
     toast: Option<(String, Instant, Duration)>,
     error: Option<String>,
@@ -66,6 +71,7 @@ impl App {
             muted: false,
             show_mixer: get("mixer").as_deref() == Some("1"),
             show_strip: profile.thumbnails && get("strip").as_deref() == Some("1"),
+            show_help: false,
             fullscreen: false,
             toast: None,
             error: (!gpu).then(|| "GPU renderer unavailable: video cannot be shown".to_string()),
@@ -163,6 +169,10 @@ impl App {
                     ..
                 } => self.on_key(key, modifiers),
                 egui::Event::Text(text) => {
+                    if text == "?" {
+                        self.show_help = !self.show_help;
+                        continue;
+                    }
                     let skip = match text.as_str() {
                         "[" => -5.0,
                         "]" => 10.0,
@@ -199,6 +209,7 @@ impl App {
         }
         match key {
             Key::F | Key::F11 => self.toggle_fullscreen(),
+            Key::Escape if self.show_help => self.show_help = false,
             Key::Escape if self.fullscreen => self.toggle_fullscreen(),
             Key::A => {
                 self.show_mixer = !self.show_mixer;
@@ -414,6 +425,78 @@ impl App {
             });
     }
 
+    fn keybinds(&self) -> Vec<(&'static str, &'static str)> {
+        let mut binds = vec![
+            ("Space", "Play / pause"),
+            ("Left / Right  , / .", "Step one frame"),
+            ("[ / ]", "Skip -5 s / +10 s"),
+            ("{ / }", "Skip -15 s / +30 s"),
+            ("Home / End", "Start / end"),
+            ("Up / Down", "Volume"),
+            ("M", "Mute"),
+            ("A", "Audio mixer"),
+        ];
+        if self.profile.thumbnails {
+            binds.push(("T", "Thumbnail strip"));
+        }
+        binds.extend([
+            ("F / F11", "Fullscreen"),
+            ("Esc", "Leave fullscreen"),
+            (OPEN_KEY, "Open a file"),
+            ("?", "Toggle this help"),
+        ]);
+        binds
+    }
+
+    fn help_overlay(&self, painter: &egui::Painter, area: Rect) {
+        let font = FontId::proportional(15.0);
+        let key_font = FontId::monospace(14.0);
+        let rows: Vec<_> = self
+            .keybinds()
+            .into_iter()
+            .map(|(key, action)| {
+                (
+                    painter.layout_no_wrap(key.into(), key_font.clone(), timeline::ACCENT),
+                    painter.layout_no_wrap(action.into(), font.clone(), Color32::WHITE),
+                )
+            })
+            .collect();
+        let title = painter.layout_no_wrap(
+            "Keyboard shortcuts".into(),
+            FontId::proportional(18.0),
+            Color32::WHITE,
+        );
+        let (pad, gap, row_h) = (18.0, 24.0, 22.0);
+        let key_w = rows.iter().map(|r| r.0.size().x).fold(0.0, f32::max);
+        let action_w = rows.iter().map(|r| r.1.size().x).fold(0.0, f32::max);
+        let width = (key_w + gap + action_w).max(title.size().x) + pad * 2.0;
+        let height = title.size().y + 12.0 + row_h * rows.len() as f32 + pad * 2.0;
+        let panel = Rect::from_center_size(area.center(), vec2(width, height));
+        painter.rect(
+            panel,
+            CornerRadius::same(12),
+            Color32::from_black_alpha(220),
+            (1.0, Color32::from_gray(85)),
+            egui::StrokeKind::Inside,
+        );
+        let mut y = panel.top() + pad;
+        let title_h = title.size().y;
+        painter.galley(egui::pos2(panel.left() + pad, y), title, Color32::WHITE);
+        y += title_h + 12.0;
+        for (key, action) in rows {
+            let x = panel.left() + pad;
+            let key_y = y + (row_h - key.size().y) / 2.0;
+            let action_y = y + (row_h - action.size().y) / 2.0;
+            painter.galley(egui::pos2(x, key_y), key, Color32::WHITE);
+            painter.galley(
+                egui::pos2(x + key_w + gap, action_y),
+                action,
+                Color32::WHITE,
+            );
+            y += row_h;
+        }
+    }
+
     fn video_area(&mut self, ui: &mut egui::Ui) {
         let rect = ui.max_rect();
         let response = ui.allocate_rect(rect, egui::Sense::click());
@@ -493,9 +576,16 @@ impl App {
             painter.text(
                 welcome.center(),
                 Align2::CENTER_CENTER,
-                "Click, drop a file, or press Ctrl+O",
+                format!("Click, drop a file, or press {OPEN_KEY}"),
                 FontId::proportional(19.0),
                 colour,
+            );
+            painter.text(
+                welcome.center_bottom() + vec2(0.0, 16.0),
+                Align2::CENTER_TOP,
+                "Press ? for keyboard shortcuts",
+                FontId::proportional(14.0),
+                Color32::from_gray(140),
             );
             if hover {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -529,6 +619,10 @@ impl App {
             } else {
                 self.toast = None;
             }
+        }
+
+        if self.show_help {
+            self.help_overlay(&painter, rect);
         }
 
         // Hide the pointer over the picture while playing and idle.
