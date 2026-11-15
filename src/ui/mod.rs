@@ -1,6 +1,7 @@
 //! The window: video, overlays, timeline, mixer and keyboard handling.
 
 mod app;
+mod mixer;
 mod timeline;
 mod video_view;
 

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Key, Pos2, Rect, vec2};
 
-use super::{format_time, timeline, video_view};
+use super::{format_time, mixer, timeline, video_view};
 use crate::engine::{AudioOutput, Event, Player};
 use crate::media::thumbs::Thumbnailer;
 use crate::profile::Profile;
@@ -389,29 +389,29 @@ impl App {
     }
 
     fn mixer(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(6.0);
-        ui.vertical_centered(|ui| ui.strong("Audio Mixer"));
-        ui.add_space(4.0);
-        let mut master = self.volume * 100.0;
-        if mixer_channel(ui, "Master", &mut master, &mut self.muted) {
-            self.volume = master / 100.0;
-            self.output.set_master(self.volume);
-            self.output.set_muted(self.muted);
-        }
-        let Some(player) = &self.player else { return };
-        if player.tracks.is_empty() {
-            ui.weak("No audio tracks");
-        }
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (control, info) in player.tracks.iter().zip(&player.info.audio) {
-                let mut gain = control.gain() * 100.0;
-                let mut muted = control.muted();
-                if mixer_channel(ui, &info.label, &mut gain, &mut muted) {
-                    control.set_gain(gain / 100.0);
-                    control.set_muted(muted);
+        ui.spacing_mut().item_spacing.y = 8.0;
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new("Audio Mixer").strong().size(15.0));
+        egui::ScrollArea::vertical()
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                if mixer::channel(ui, "Master", &mut self.volume, &mut self.muted) {
+                    self.output.set_master(self.volume);
+                    self.output.set_muted(self.muted);
                 }
-            }
-        });
+                let Some(player) = &self.player else { return };
+                if player.tracks.is_empty() {
+                    ui.weak("No audio tracks");
+                }
+                for (control, info) in player.tracks.iter().zip(&player.info.audio) {
+                    let mut gain = control.gain();
+                    let mut muted = control.muted();
+                    if mixer::channel(ui, &info.label, &mut gain, &mut muted) {
+                        control.set_gain(gain);
+                        control.set_muted(muted);
+                    }
+                }
+            });
     }
 
     fn video_area(&mut self, ui: &mut egui::Ui) {
@@ -579,12 +579,12 @@ impl eframe::App for App {
         }
         if self.show_mixer {
             egui::Panel::right("mixer")
-                .exact_size(150.0)
+                .exact_size(200.0)
                 .resizable(false)
                 .frame(
                     egui::Frame::new()
                         .fill(PANEL_BG)
-                        .inner_margin(egui::Margin::same(6)),
+                        .inner_margin(egui::Margin::same(10)),
                 )
                 .show(ui, |ui| self.mixer(ui));
         }
@@ -601,33 +601,6 @@ impl eframe::App for App {
         storage.set_string("mixer", if self.show_mixer { "1" } else { "0" }.into());
         storage.set_string("strip", if self.show_strip { "1" } else { "0" }.into());
     }
-}
-
-/// One mixer strip. Returns true if anything changed.
-fn mixer_channel(ui: &mut egui::Ui, label: &str, value: &mut f32, muted: &mut bool) -> bool {
-    let mut changed = false;
-    egui::Frame::new()
-        .fill(Color32::from_rgb(52, 52, 52))
-        .corner_radius(CornerRadius::same(4))
-        .inner_margin(egui::Margin::same(6))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.vertical_centered(|ui| {
-                ui.label(egui::RichText::new(label).strong());
-                ui.spacing_mut().slider_width = 90.0;
-                changed |= ui
-                    .add(
-                        egui::Slider::new(value, 0.0..=100.0)
-                            .vertical()
-                            .suffix("%")
-                            .fixed_decimals(0),
-                    )
-                    .changed();
-                changed |= ui.checkbox(muted, "Mute").changed();
-            });
-        });
-    ui.add_space(4.0);
-    changed
 }
 
 /// Thumbnail textures, requested on demand from the background decoder.
