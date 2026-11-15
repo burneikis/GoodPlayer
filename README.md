@@ -41,7 +41,9 @@ continuously.
 
 ## Install
 
-Download an archive from [Releases](https://github.com/burneikis/goodplayer/releases).
+Download an archive from [Releases](https://github.com/burneikis/GoodPlayer/releases).
+Versioned releases are published when the version changes; the `nightly`
+pre-release always holds the latest build of `main`.
 
 - **Linux**: unpack and run `./install.sh` (installs to `~/.local`; FFmpeg is
   bundled). `./install.sh --uninstall` removes it.

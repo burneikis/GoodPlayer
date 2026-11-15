@@ -1,9 +1,16 @@
 name: Release
 
+# Every push to main builds all platforms. A version in Cargo.toml that has
+# no release yet is published as that version; otherwise the rolling
+# "nightly" pre-release is replaced with the new build.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -114,16 +121,29 @@ jobs:
           path: dist/*.zip
 
   release:
-    # Manual runs only build artifacts; tags publish them.
-    if: startsWith(github.ref, 'refs/tags/')
     needs: [linux, windows, macos]
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
-          generate_release_notes: true
+      - name: Publish
+        run: |
+          version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          if ! git rev-parse -q --verify "refs/tags/$version" > /dev/null; then
+            gh release create "$version" artifacts/* \
+              --target "$GITHUB_SHA" --title "GoodPlayer $version" --generate-notes --latest
+          else
+            short="${GITHUB_SHA::7}"
+            gh release delete nightly --cleanup-tag --yes 2> /dev/null || true
+            gh release create nightly artifacts/* \
+              --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "Nightly ($short)" \
+              --notes "Latest build of main at $short, after $version. Not a versioned release."
+          fi
