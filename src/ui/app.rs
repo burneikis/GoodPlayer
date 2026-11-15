@@ -12,6 +12,12 @@ use crate::media::thumbs::Thumbnailer;
 use crate::profile::Profile;
 
 const CURSOR_HIDE_AFTER: Duration = Duration::from_secs(2);
+/// Height of the seek bar overlay at the bottom of the video.
+const CONTROLS_HEIGHT: f32 = 34.0;
+/// Height of the gradient that keeps the overlay readable on bright video.
+const CONTROLS_SHADE: f32 = 80.0;
+/// Seconds for the overlay to fade in or out.
+const CONTROLS_FADE: f32 = 0.2;
 const THUMB_SLOTS: u32 = 240;
 const STRIP_COUNT: u32 = 10;
 const VOLUME_STEP: f32 = 0.05;
@@ -399,6 +405,37 @@ impl App {
         });
     }
 
+    /// The seek bar, floating over the bottom of the video and fading out
+    /// with the pointer while playing.
+    fn controls_overlay(&mut self, ui: &mut egui::Ui, video: Rect, fade: f32) {
+        if fade <= 0.0 {
+            return;
+        }
+        let area = controls_rect(video);
+        let shade = Rect::from_min_max(
+            egui::pos2(area.left(), area.bottom() - CONTROLS_SHADE),
+            area.right_bottom(),
+        );
+        let top = Color32::TRANSPARENT;
+        let bottom = Color32::from_black_alpha((170.0 * fade) as u8);
+        let mut mesh = egui::Mesh::default();
+        mesh.colored_vertex(shade.left_top(), top);
+        mesh.colored_vertex(shade.right_top(), top);
+        mesh.colored_vertex(shade.right_bottom(), bottom);
+        mesh.colored_vertex(shade.left_bottom(), bottom);
+        mesh.add_triangle(0, 1, 2);
+        mesh.add_triangle(0, 2, 3);
+        ui.painter_at(video).add(mesh);
+
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("controls")
+                .max_rect(area.shrink2(vec2(10.0, 6.0))),
+        );
+        child.multiply_opacity(fade);
+        self.controls(&mut child);
+    }
+
     fn mixer(&mut self, ui: &mut egui::Ui) {
         ui.spacing_mut().item_spacing.y = 8.0;
         ui.add_space(2.0);
@@ -503,6 +540,20 @@ impl App {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, CornerRadius::ZERO, Color32::BLACK);
 
+        let moved = ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO || i.pointer.any_down());
+        if moved {
+            self.pointer_moved = Instant::now();
+        }
+        let playing = self.player.as_ref().is_some_and(Player::is_playing);
+        let idle = self.pointer_moved.elapsed() >= CURSOR_HIDE_AFTER;
+        let over_controls = ui.rect_contains_pointer(controls_rect(rect));
+        let show_controls = !playing || !idle || over_controls || self.scrub.is_some();
+        let controls_fade = ui.ctx().animate_bool_with_time(
+            egui::Id::unique("controls_fade"),
+            show_controls,
+            CONTROLS_FADE,
+        );
+
         if let Some(frame) = self
             .player
             .as_ref()
@@ -534,9 +585,11 @@ impl App {
             painter.text(pos, align, text, small.clone(), Color32::WHITE);
         };
         let margin = 10.0;
+        // Labels ride above the timeline while it is shown.
+        let lift = CONTROLS_HEIGHT * controls_fade;
         if let Some(p) = &self.player {
             shadowed(
-                rect.left_bottom() + vec2(margin, -margin),
+                rect.left_bottom() + vec2(margin, -margin - lift),
                 Align2::LEFT_BOTTOM,
                 format!(
                     "{} / {}",
@@ -546,7 +599,7 @@ impl App {
             );
             if self.profile.frame_counter {
                 shadowed(
-                    rect.right_bottom() + vec2(-margin, -margin),
+                    rect.right_bottom() + vec2(-margin, -margin - lift),
                     Align2::RIGHT_BOTTOM,
                     format!("Frame {} / {}", p.frame_number(), p.info.total_frames()),
                 );
@@ -625,17 +678,13 @@ impl App {
             self.help_overlay(&painter, rect);
         }
 
+        // Drawn last so the timeline sits on top of the picture and wins
+        // pointer hit-testing over the video area.
+        self.controls_overlay(ui, rect, controls_fade);
+
         // Hide the pointer over the picture while playing and idle.
-        let moved = ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO || i.pointer.any_down());
-        if moved {
-            self.pointer_moved = Instant::now();
-        }
-        let playing = self.player.as_ref().is_some_and(Player::is_playing);
-        if playing && response.hovered() {
-            let idle = self.pointer_moved.elapsed();
-            if idle >= CURSOR_HIDE_AFTER {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::None);
-            }
+        if playing && response.hovered() && idle {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::None);
         }
     }
 }
@@ -655,13 +704,6 @@ impl eframe::App for App {
             t.poll(&ctx);
         }
 
-        egui::Panel::bottom("controls")
-            .frame(
-                egui::Frame::new()
-                    .fill(PANEL_BG)
-                    .inner_margin(egui::Margin::symmetric(10, 6)),
-            )
-            .show(ui, |ui| self.controls(ui));
         if self.show_strip && self.player.is_some() {
             egui::Panel::bottom("strip")
                 .frame(
@@ -695,6 +737,13 @@ impl eframe::App for App {
         storage.set_string("mixer", if self.show_mixer { "1" } else { "0" }.into());
         storage.set_string("strip", if self.show_strip { "1" } else { "0" }.into());
     }
+}
+
+fn controls_rect(video: Rect) -> Rect {
+    Rect::from_min_max(
+        egui::pos2(video.left(), video.bottom() - CONTROLS_HEIGHT),
+        video.right_bottom(),
+    )
 }
 
 /// Thumbnail textures, requested on demand from the background decoder.
