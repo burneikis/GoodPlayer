@@ -18,6 +18,8 @@ const START_TIMEOUT: Duration = Duration::from_millis(1500);
 /// How many frame durations the picture may trail the clock before frames
 /// are skipped to catch up.
 const MAX_LAG_FRAMES: f64 = 2.0;
+/// How often to check whether audio and video are ready to start together.
+const START_POLL: Duration = Duration::from_millis(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -106,6 +108,26 @@ impl Player {
         match self.state {
             State::Playing => self.playhead.now().min(self.info.duration),
             _ => self.position,
+        }
+    }
+
+    /// How long until the UI should next call [`Player::update`] while
+    /// playing: when the next queued frame is due, or soon while starting.
+    /// None when paused or when waiting on the decoder, which wakes the UI
+    /// itself.
+    pub fn next_update_in(&self) -> Option<Duration> {
+        match self.state {
+            State::Paused => None,
+            State::Starting => Some(START_POLL),
+            State::Playing => {
+                let due = self.queued.front().map(|f| f.time).or_else(|| {
+                    // Nothing queued: the end may still need noticing.
+                    let shown = self.shown.as_ref().map_or(0.0, |f| f.time);
+                    self.video_ended
+                        .then(|| (shown + self.info.frame_duration()).min(self.info.duration))
+                })?;
+                Some(Duration::from_secs_f64((due - self.time()).max(0.0)))
+            }
         }
     }
 

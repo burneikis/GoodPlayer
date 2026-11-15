@@ -21,10 +21,15 @@ pub fn run(profile: &'static Profile, file: Option<PathBuf>) -> anyhow::Result<(
     if let Ok(icon) = eframe::icon_data::from_png_bytes(profile.icon_png) {
         viewport = viewport.with_icon(icon);
     }
-    let options = eframe::NativeOptions {
+    let mut options = eframe::NativeOptions {
         viewport,
         ..Default::default()
     };
+    // No vsync: the app paces repaints to the video's frame times. Vsync'd
+    // presentation on X11/NVIDIA without a compositor bunches large windows'
+    // frames (several 33 ms gaps, then a burst), halving the visible
+    // framerate. Falls back to vsync where no-vsync is unsupported.
+    options.wgpu_options.surface.present_mode = eframe::egui_wgpu::wgpu::PresentMode::AutoNoVsync;
     eframe::run_native(
         profile.app_id,
         options,

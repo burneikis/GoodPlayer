@@ -12,6 +12,9 @@ use crate::media::thumbs::Thumbnailer;
 use crate::profile::Profile;
 
 const CURSOR_HIDE_AFTER: Duration = Duration::from_secs(2);
+/// Longest gap between repaints while playing, so the time readout and
+/// timeline keep moving between video frames.
+const CLOCK_REFRESH: Duration = Duration::from_micros(16_667);
 /// Height of the seek bar overlay at the bottom of the video.
 const CONTROLS_HEIGHT: f32 = 34.0;
 /// How far the time/frame labels dip into the controls area when lifted.
@@ -730,9 +733,12 @@ impl eframe::App for App {
         }
         egui::CentralPanel::no_frame().show(ui, |ui| self.video_area(ui));
 
-        if self.player.as_ref().is_some_and(Player::is_playing) {
-            // Every vsync: the clock moves continuously.
-            ctx.request_repaint();
+        // Vsync is off (see `ui::run`), so pace repaints ourselves: exactly
+        // when the next frame is due, and often enough for a smooth clock.
+        if let Some(wait) = self.player.as_ref().and_then(Player::next_update_in) {
+            ctx.request_repaint_after(wait.min(CLOCK_REFRESH));
+        } else if self.player.as_ref().is_some_and(Player::is_playing) {
+            ctx.request_repaint_after(CLOCK_REFRESH);
         }
     }
 
