@@ -126,11 +126,9 @@ impl Player {
         if self.is_playing() {
             return;
         }
-        let from = if self.at_end {
-            0.0
-        } else {
-            self.shown.as_ref().map_or(self.position, |f| f.time)
-        };
+        // `position` tracks the latest paused target, including a seek whose
+        // frame has not arrived yet; `shown` may still be the old frame.
+        let from = if self.at_end { 0.0 } else { self.position };
         self.start_at(from);
     }
 
