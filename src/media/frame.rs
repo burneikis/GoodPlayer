@@ -76,7 +76,7 @@ impl FrameConverter {
         let planar = if matches!(src.format(), Pixel::YUV420P | Pixel::YUVJ420P) {
             src
         } else {
-            self.to_yuv420p(src)?
+            self.convert_to_yuv420p(src)?
         };
 
         let (cw, ch) = (w.div_ceil(2) as usize, h.div_ceil(2) as usize);
@@ -93,7 +93,7 @@ impl FrameConverter {
         })
     }
 
-    fn to_yuv420p<'a>(
+    fn convert_to_yuv420p<'a>(
         &'a mut self,
         src: &ffmpeg::frame::Video,
     ) -> Result<&'a ffmpeg::frame::Video, ffmpeg::Error> {

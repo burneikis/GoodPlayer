@@ -95,7 +95,7 @@ impl Shared {
             let played = self.mark_played.load(Ordering::Relaxed);
             let ns = self.mark_ns.load(Ordering::Relaxed);
             let s2 = self.seq.load(Ordering::Acquire);
-            if s1 == s2 && s1 % 2 == 0 {
+            if s1 == s2 && s1.is_multiple_of(2) {
                 return (played, ns);
             }
             std::hint::spin_loop();

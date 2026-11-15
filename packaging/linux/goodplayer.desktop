@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=GoodPlayer
+GenericName=Video Player
+Comment=Frame-accurate video player with simultaneous multi-track audio
+Exec=goodplayer %f
+Icon=goodplayer
+Terminal=false
+StartupWMClass=goodplayer
+Categories=AudioVideo;Video;Player;
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/x-m4v;video/x-flv;video/x-ms-wmv;video/3gpp;video/ogg;video/mp2t;

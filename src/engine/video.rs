@@ -276,7 +276,7 @@ impl Worker {
         if self.eof {
             return None;
         }
-        match self.decoder.next() {
+        match self.decoder.next_frame() {
             Some(f) => {
                 self.last = Some(self.cache.insert(Arc::clone(&f), self.last, center));
                 Some(f)

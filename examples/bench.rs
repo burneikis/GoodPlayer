@@ -76,13 +76,13 @@ fn main() {
     let (mut shown, mut last_id, mut late) = (0u32, 0u64, 0u32);
     while start.elapsed() < Duration::from_secs(5) {
         p.update();
-        if let Some(f) = p.frame() {
-            if f.id != last_id {
-                shown += 1;
-                last_id = f.id;
-                if p.time() - f.time > 2.0 / p.info.fps {
-                    late += 1;
-                }
+        if let Some(f) = p.frame()
+            && f.id != last_id
+        {
+            shown += 1;
+            last_id = f.id;
+            if p.time() - f.time > 2.0 / p.info.fps {
+                late += 1;
             }
         }
         std::thread::sleep(Duration::from_micros(4167)); // ~240 Hz "vsync"

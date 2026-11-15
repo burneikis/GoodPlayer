@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  BTBN: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config clang
+      - name: FFmpeg
+        run: |
+          mkdir -p "$RUNNER_TEMP/ffmpeg"
+          curl -sL "$BTBN/ffmpeg-n9.0-latest-linux64-lgpl-shared-9.0.tar.xz" | tar xJ -C "$RUNNER_TEMP/ffmpeg" --strip-components=1
+          echo "FFMPEG_DIR=$RUNNER_TEMP/ffmpeg" >> "$GITHUB_ENV"
+      - name: Build
+        env:
+          RUSTFLAGS: -C link-arg=-Wl,-rpath,$ORIGIN/lib
+        run: cargo build --release --locked
+      - name: Package
+        run: |
+          name=goodplayer-linux-x86_64
+          dir="dist/$name"
+          mkdir -p "$dir/lib"
+          cp target/release/goodplayer target/release/doesplayer "$dir/"
+          for lib in avcodec avformat avutil swresample swscale; do
+            cp -P "$FFMPEG_DIR"/lib/lib$lib.so.* "$dir/lib/"
+          done
+          cp packaging/linux/*.desktop packaging/linux/install.sh assets/goodplayer.png assets/doesplayer.png README.md LICENSE "$dir/"
+          tar -C dist -cJf "dist/$name.tar.xz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*.tar.xz
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: FFmpeg
+        run: |
+          curl -sL -o ffmpeg.zip "$BTBN/ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip"
+          7z x -y ffmpeg.zip > /dev/null
+          echo "FFMPEG_DIR=$(cygpath -w "$PWD/ffmpeg-n9.0-latest-win64-lgpl-shared-9.0")" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV"
+      - name: Build
+        run: cargo build --release --locked
+      - name: Package
+        run: |
+          name=goodplayer-windows-x86_64
+          dir="dist/$name"
+          mkdir -p "$dir"
+          cp target/release/goodplayer.exe target/release/doesplayer.exe README.md LICENSE "$dir/"
+          for lib in avcodec avformat avutil swresample swscale; do
+            cp ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/bin/$lib-*.dll "$dir/"
+          done
+          (cd dist && 7z a "$name.zip" "$name" > /dev/null)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.zip
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Dependencies
+        run: brew install ffmpeg pkg-config dylibbundler
+      - name: Build
+        run: cargo build --release --locked
+      - name: Package
+        run: |
+          version="$(cargo pkgid | sed 's/.*[#@]//')"
+          mkdir -p dist
+          for app in GoodPlayer:goodplayer DoesPlayer:doesplayer; do
+            name="${app%%:*}"; id="${app##*:}"
+            bundle="dist/$name.app"
+            mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources" "$bundle/Contents/Frameworks"
+            cp "target/release/$id" "$bundle/Contents/MacOS/"
+            cp "assets/$id.icns" "$bundle/Contents/Resources/"
+            sed -e "s/@NAME@/$name/g" -e "s/@ID@/$id/g" -e "s/@VERSION@/$version/g" \
+              packaging/macos/Info.plist > "$bundle/Contents/Info.plist"
+            dylibbundler -of -cd -b -x "$bundle/Contents/MacOS/$id" \
+              -d "$bundle/Contents/Frameworks" -p @executable_path/../Frameworks/
+            codesign --force --deep --sign - "$bundle"
+          done
+          (cd dist && ditto -c -k --keepParent GoodPlayer.app GoodPlayer-macos-arm64.zip \
+            && ditto -c -k --keepParent DoesPlayer.app DoesPlayer-macos-arm64.zip)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.zip
+
+  release:
+    # Manual runs only build artifacts; tags publish them.
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

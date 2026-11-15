@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DoesPlayer
+GenericName=Video Player
+Comment=Simple video player with simultaneous multi-track audio
+Exec=doesplayer %f
+Icon=doesplayer
+Terminal=false
+StartupWMClass=doesplayer
+Categories=AudioVideo;Video;Player;
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/x-m4v;video/x-flv;video/x-ms-wmv;video/3gpp;video/ogg;video/mp2t;

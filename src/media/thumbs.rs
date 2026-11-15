@@ -82,6 +82,9 @@ impl Drop for Thumbnailer {
     }
 }
 
+/// Source (format, width, height), the context, and output (width, height).
+type Scaler = ((Pixel, u32, u32), scaling::Context, u32, u32);
+
 struct Worker {
     input: ffmpeg::format::context::Input,
     decoder: ffmpeg::decoder::Video,
@@ -89,7 +92,7 @@ struct Worker {
     start: f64,
     duration: f64,
     slots: u32,
-    scaler: Option<((Pixel, u32, u32), scaling::Context, u32, u32)>,
+    scaler: Option<Scaler>,
 }
 
 // SAFETY: as for `FrameConverter`, the scaler is owned and used by one thread.

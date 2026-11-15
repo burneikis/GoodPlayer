@@ -57,7 +57,7 @@ impl VideoDecoder {
     }
 
     /// The next frame in presentation order, or `None` at the end.
-    pub fn next(&mut self) -> Option<Arc<VideoFrame>> {
+    pub fn next_frame(&mut self) -> Option<Arc<VideoFrame>> {
         loop {
             match self.decoder.receive_frame(&mut self.raw) {
                 Ok(()) => {
