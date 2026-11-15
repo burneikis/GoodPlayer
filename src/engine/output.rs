@@ -156,12 +156,9 @@ impl Callback {
         };
         for (frame, src) in out
             .chunks_exact_mut(channels)
-            .zip(self.mix.chunks_exact(CHANNELS))
+            .zip(self.mix.as_chunks::<CHANNELS>().0)
         {
-            let (l, r) = (
-                (src[0] * master).clamp(-1.0, 1.0),
-                (src[1] * master).clamp(-1.0, 1.0),
-            );
+            let [l, r] = src.map(|s| (s * master).clamp(-1.0, 1.0));
             match frame {
                 [mono] => *mono = 0.5 * (l + r),
                 [a, b, rest @ ..] => {

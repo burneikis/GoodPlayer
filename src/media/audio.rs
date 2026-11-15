@@ -280,8 +280,10 @@ impl Decoder {
         let frames = out.samples();
         let bytes = &out.data(0)[..frames * CHANNELS * 4];
         let mut samples: Vec<f32> = bytes
-            .chunks_exact(4)
-            .map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_ne_bytes(*b))
             .collect();
 
         let rate_f = f64::from(rate);

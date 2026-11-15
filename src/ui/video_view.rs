@@ -302,8 +302,8 @@ fn params_bytes(matrix: Matrix, full_range: bool, srgb_target: bool) -> [u8; 64]
     values[12..16].copy_from_slice(&range);
     values[15] = if srgb_target { 1.0 } else { 0.0 };
     let mut out = [0u8; 64];
-    for (chunk, v) in out.chunks_exact_mut(4).zip(values) {
-        chunk.copy_from_slice(&v.to_ne_bytes());
+    for (chunk, v) in out.as_chunks_mut::<4>().0.iter_mut().zip(values) {
+        *chunk = v.to_ne_bytes();
     }
     out
 }
