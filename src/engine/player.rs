@@ -15,6 +15,9 @@ use crate::media::{MediaInfo, VideoFrame};
 
 /// Longest we wait for audio and video to be ready before starting anyway.
 const START_TIMEOUT: Duration = Duration::from_millis(1500);
+/// How many frame durations the picture may trail the clock before frames
+/// are skipped to catch up.
+const MAX_LAG_FRAMES: f64 = 2.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -257,9 +260,7 @@ impl Player {
             }
             State::Playing => {
                 let now = self.time();
-                while self.queued.front().is_some_and(|f| f.time <= now) {
-                    self.shown = self.queued.pop_front();
-                }
+                self.advance_shown(now);
                 let shown_end =
                     self.shown.as_ref().map_or(0.0, |f| f.time) + self.info.frame_duration();
                 if self.video_ended
@@ -273,6 +274,20 @@ impl Player {
             }
         }
         event
+    }
+
+    /// Show the next due frame. Repaints can arrive unevenly (two back to
+    /// back, then a long gap), so taking only the newest due frame would skip
+    /// every other one. Advance one frame per repaint and only skip when the
+    /// picture has fallen clearly behind the clock.
+    fn advance_shown(&mut self, now: f64) {
+        let max_lag = MAX_LAG_FRAMES * self.info.frame_duration();
+        while self.queued.len() > 1 && self.queued[1].time + max_lag <= now {
+            self.queued.pop_front();
+        }
+        if self.queued.front().is_some_and(|f| f.time <= now) {
+            self.shown = self.queued.pop_front();
+        }
     }
 }
 
