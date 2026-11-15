@@ -45,9 +45,11 @@ Download an archive from [Releases](https://github.com/burneikis/GoodPlayer/rele
 Versioned releases are published when the version changes; the `nightly`
 pre-release always holds the latest build of `main`.
 
+Each player has its own download for every platform.
+
 - **Linux**: unpack and run `./install.sh` (installs to `~/.local`; FFmpeg is
   bundled). `./install.sh --uninstall` removes it.
-- **Windows**: unzip and run `goodplayer.exe` or `doesplayer.exe`.
+- **Windows**: unzip and run `goodplayer.exe` (or `doesplayer.exe`).
 - **macOS** (Apple Silicon): unzip and move the app to Applications. The
   apps are not notarised, so the first launch needs right-click, Open (or
   `xattr -cr GoodPlayer.app`). Open files with drag and drop or Cmd+O.

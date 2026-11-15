@@ -41,15 +41,17 @@ jobs:
         run: cargo build --release --locked
       - name: Package
         run: |
-          name=goodplayer-linux-x86_64
-          dir="dist/$name"
-          mkdir -p "$dir/lib"
-          cp target/release/goodplayer target/release/doesplayer "$dir/"
-          for lib in avcodec avformat avutil swresample swscale; do
-            cp -P "$FFMPEG_DIR"/lib/lib$lib.so.* "$dir/lib/"
+          for app in GoodPlayer:goodplayer DoesPlayer:doesplayer; do
+            name="${app%%:*}-linux-x86_64"; id="${app##*:}"
+            dir="dist/$name"
+            mkdir -p "$dir/lib"
+            cp "target/release/$id" "packaging/linux/$id.desktop" "assets/$id.png" "$dir/"
+            cp packaging/linux/install.sh README.md LICENSE "$dir/"
+            for lib in avcodec avformat avutil swresample swscale; do
+              cp -P "$FFMPEG_DIR"/lib/lib$lib.so.* "$dir/lib/"
+            done
+            tar -C dist -cJf "dist/$name.tar.xz" "$name"
           done
-          cp packaging/linux/*.desktop packaging/linux/install.sh assets/goodplayer.png assets/doesplayer.png README.md LICENSE "$dir/"
-          tar -C dist -cJf "dist/$name.tar.xz" "$name"
       - uses: actions/upload-artifact@v4
         with:
           name: linux
@@ -74,14 +76,16 @@ jobs:
         run: cargo build --release --locked
       - name: Package
         run: |
-          name=goodplayer-windows-x86_64
-          dir="dist/$name"
-          mkdir -p "$dir"
-          cp target/release/goodplayer.exe target/release/doesplayer.exe README.md LICENSE "$dir/"
-          for lib in avcodec avformat avutil swresample swscale; do
-            cp ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/bin/$lib-*.dll "$dir/"
+          for app in GoodPlayer:goodplayer DoesPlayer:doesplayer; do
+            name="${app%%:*}-windows-x86_64"; id="${app##*:}"
+            dir="dist/$name"
+            mkdir -p "$dir"
+            cp "target/release/$id.exe" README.md LICENSE "$dir/"
+            for lib in avcodec avformat avutil swresample swscale; do
+              cp ffmpeg-n9.0-latest-win64-lgpl-shared-9.0/bin/$lib-*.dll "$dir/"
+            done
+            (cd dist && 7z a "$name.zip" "$name" > /dev/null)
           done
-          (cd dist && 7z a "$name.zip" "$name" > /dev/null)
       - uses: actions/upload-artifact@v4
         with:
           name: windows
