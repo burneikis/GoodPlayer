@@ -23,6 +23,9 @@ pub fn run(profile: &'static Profile, file: Option<PathBuf>) -> anyhow::Result<(
     }
     let mut options = eframe::NativeOptions {
         viewport,
+        // Don't restore the last window state: it would reopen fullscreen
+        // while `App::fullscreen` starts false, and i3 places the window anyway.
+        persist_window: false,
         ..Default::default()
     };
     // No vsync: the app paces repaints to the video's frame times. Vsync'd
